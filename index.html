@@ -603,7 +603,7 @@ function excelDateToISO(v){
   if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
   return null;
 }
-function buildDraftFromDianRow(row, empresa){
+function buildDraftFromDianRow(row, empresa, proveedores){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
   var esVenta = nitMatches(row["NIT Emisor"], empresa.nit);
@@ -640,17 +640,24 @@ function buildDraftFromDianRow(row, empresa){
   }
   if(esNC){ lineas = lineas.map(function(l){ return {cuenta:l.cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito}; }); }
 
+  var esPersonal = false;
+  if(esCompra){
+    var esProveedorConocido = (proveedores||[]).some(function(p){ return nitMatches(row["NIT Emisor"], p.identificacion); });
+    esPersonal = !esProveedorConocido;
+  }
+
   var tot = totalsOf(lineas);
   return {
     tipo: esVenta? "FV":"FC",
     fecha: fecha,
-    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")",
+    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")"+(esPersonal?" [personal]":""),
     lineas: lineas,
     cufe: cufe,
     tercNombre: tercNombre,
     total: total,
     esVenta: esVenta,
     esNC: esNC,
+    esPersonal: esPersonal,
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
 }
@@ -669,15 +676,16 @@ function handleImportFile(file){
       var seenInFile = {};
       var drafts=[];
       var skippedFecha=0, sampleFecha=null;
+      var proveedores = S.terceros.filter(function(t){ return t.tipo==="proveedor" && t.identificacion; });
       json.forEach(function(row){
         var estado = String(row["Estado"]||"").toLowerCase();
         if(estado.indexOf("rechaz")>=0 || estado.indexOf("anulad")>=0) return;
-        var d = buildDraftFromDianRow(row, empresa);
+        var d = buildDraftFromDianRow(row, empresa, proveedores);
         if(!d) return;
         if(d._error==="fecha"){ skippedFecha++; if(sampleFecha==null) sampleFecha=d.raw; return; }
         d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
         if(d.cufe) seenInFile[d.cufe]=true;
-        d.include = !d.dup;
+        d.include = !d.dup && !d.esPersonal;
         drafts.push(d);
       });
       S.importRows = drafts;
@@ -1112,7 +1120,7 @@ function periodosHTML(e){
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
-    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras.</p>' +
+    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor no esté registrado como <a class="link" onclick="app.setTab(\'terceros\')">proveedor en Terceros</a> se marcan como <b>Personal</b> y no se seleccionan — regístralos ahí antes de importar si son gastos reales del negocio.</p>' +
     '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
@@ -1124,6 +1132,7 @@ function importarHTML(e){
       var flags = "";
       if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
       else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
+      else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Personal</span>';
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
         '<td>'+fmtDate(r.fecha)+'</td>' +
