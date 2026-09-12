@@ -911,7 +911,9 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
     if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
   } else {
-    lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+    var cuentaMain = (tMatch && tMatch.tipo==="proveedor") ? "1435" : "5195";
+    var nombreMain = cuentaMain==="1435" ? "Mercancías" : "Compra";
+    lineas.push({cuenta:cuentaMain, tercero:"", detalle:nombreMain+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
     if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     var pagoProveedor = total-reteIva-reteRenta-reteIca;
     lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
