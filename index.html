@@ -577,11 +577,11 @@ function excelDateToISO(v){
   if(!v) return todayISO();
   if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
   var s = String(v).trim();
-  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if(m) return m[1]+"-"+m[2]+"-"+m[3];
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[3]).padStart(2,"0");
+  m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
   if(m) return m[3]+"-"+String(m[1]).padStart(2,"0")+"-"+String(m[2]).padStart(2,"0");
-  return todayISO();
+  return null;
 }
 function buildDraftFromDianRow(row, empresa){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
@@ -597,6 +597,7 @@ function buildDraftFromDianRow(row, empresa){
   var reteRenta = Number(row["Rete Renta"])||0;
   var reteIca = Number(row["Rete ICA"])||0;
   var fecha = excelDateToISO(row["Fecha Emisión"]);
+  if(!fecha) return {_error:"fecha", raw: row["Fecha Emisión"]};
   var cufe = row["CUFE/CUDE"]||"";
   var tercNombre = esVenta ? (row["Nombre Receptor"]||"") : (row["Nombre Emisor"]||"");
   var docRef = (row["Prefijo"]||"")+""+(row["Folio"]||"");
@@ -647,11 +648,13 @@ function handleImportFile(file){
       var existingCufes = {}; S.comprobantes.forEach(function(c){ if(c.cufe) existingCufes[c.cufe]=true; });
       var seenInFile = {};
       var drafts=[];
+      var skippedFecha=0, sampleFecha=null;
       json.forEach(function(row){
         var estado = String(row["Estado"]||"").toLowerCase();
         if(estado.indexOf("rechaz")>=0 || estado.indexOf("anulad")>=0) return;
         var d = buildDraftFromDianRow(row, empresa);
         if(!d) return;
+        if(d._error==="fecha"){ skippedFecha++; if(sampleFecha==null) sampleFecha=d.raw; return; }
         d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
         if(d.cufe) seenInFile[d.cufe]=true;
         d.include = !d.dup;
@@ -659,7 +662,8 @@ function handleImportFile(file){
       });
       S.importRows = drafts;
       S.importFileName = file.name;
-      if(!drafts.length) S.importErr = "No se encontraron documentos de esta empresa en el archivo. Verifica que el NIT de la empresa esté bien escrito en Cuadre.";
+      if(!drafts.length && !skippedFecha) S.importErr = "No se encontraron documentos de esta empresa en el archivo. Verifica que el NIT de la empresa esté bien escrito en Cuadre.";
+      else if(skippedFecha>0) S.importErr = skippedFecha+" documento(s) no se pudieron importar porque no se entendió su fecha (ejemplo: "+esc(String(sampleFecha))+"). Avísale a Claude este formato para corregirlo.";
     }catch(err){
       S.importErr = "No se pudo leer el archivo: "+err.message;
     }
