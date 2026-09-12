@@ -285,6 +285,11 @@ var S = {
   empresaId:null,
   cuentas:[],
   terceros:[],
+  reglasCuentas:[],
+  reglasImportRows:null,
+  reglasImportFileName:"",
+  reglasImportErr:"",
+  reglasImportBusy:false,
   comprobantes:[],
   periodosDocs:{},
   tab:"dashboard",
@@ -353,6 +358,9 @@ function afterLogin(){
   loadConfig();
   var chCfg = sb.channel("config-rt").on("postgres_changes",{event:"*",schema:"public",table:"config"},debounce(function(){ loadConfig().then(render); })).subscribe();
   S.channels.push(chCfg);
+  loadReglasCuentas();
+  var chReg = sb.channel("reglas-rt").on("postgres_changes",{event:"*",schema:"public",table:"reglas_cuentas"},debounce(function(){ loadReglasCuentas().then(render); })).subscribe();
+  S.channels.push(chReg);
 }
 async function loadConfig(){
   var res = await sb.from("config").select("*").eq("id","global").maybeSingle();
@@ -411,9 +419,14 @@ async function selectEmpresa(id){
   var chD = sb.channel("periodos-"+id).on("postgres_changes",{event:"*",schema:"public",table:"periodos",filter:"empresa_id=eq."+id},debounce(function(){ loadPeriodos(id).then(render); })).subscribe();
   S.empresaChannels = [chC,chT,chP,chD];
 }
-async function loadAllRows(table, id){
+async function loadReglasCuentas(){
+  S.reglasCuentas = await loadAllRows("reglas_cuentas", null, true);
+}
+async function loadAllRows(table, id, global){
   var pageSize=1000;
-  var first = await sb.from(table).select("*",{count:"exact"}).eq("empresa_id",id).range(0, pageSize-1);
+  function q(){ var b=sb.from(table).select("*",{count:"exact"}); return global?b:b.eq("empresa_id",id); }
+  function qPage(){ var b=sb.from(table).select("*"); return global?b:b.eq("empresa_id",id); }
+  var first = await q().range(0, pageSize-1);
   if(first.error){ console.error(first.error); return []; }
   var all = first.data||[];
   var total = first.count==null ? all.length : first.count;
@@ -421,7 +434,7 @@ async function loadAllRows(table, id){
   if(pages>1){
     var reqs=[];
     for(var p=1;p<pages;p++){
-      reqs.push(sb.from(table).select("*").eq("empresa_id",id).range(p*pageSize, p*pageSize+pageSize-1));
+      reqs.push(qPage().range(p*pageSize, p*pageSize+pageSize-1));
     }
     var results = await Promise.all(reqs);
     results.forEach(function(res){
@@ -472,6 +485,13 @@ async function crearEmpresa(nombre, nit, sector, grupo){
   if(ins.error){ alert("No se pudo crear la empresa: "+ins.error.message); return; }
   var id = ins.data.id;
   var rows = PUC.map(function(row){ return {empresa_id:id, codigo:row[0], nombre:row[1], tipo:row[2], nivel:row[3], naturaleza:naturaleza(row[2],!!row[4]), postable:esPostable(row[0])}; });
+  var pucCodigos = {}; rows.forEach(function(r){ pucCodigos[r.codigo]=true; });
+  S.reglasCuentas.forEach(function(r){
+    if(!r.cuenta_codigo || pucCodigos[r.cuenta_codigo]) return;
+    pucCodigos[r.cuenta_codigo]=true;
+    var tipo = tipoDesdeCodigo(r.cuenta_codigo);
+    rows.push({empresa_id:id, codigo:r.cuenta_codigo, nombre:r.cuenta_nombre||r.cuenta_codigo, tipo:tipo, nivel:r.cuenta_codigo.length>=6?2:1, naturaleza:naturaleza(tipo,false), postable:true});
+  });
   await sb.from("cuentas").insert(rows);
   closeModal();
   selectEmpresa(id);
@@ -597,7 +617,7 @@ function nombreCompletoTercero(d){
 async function guardarTercero(d){
   var nombre = nombreCompletoTercero(d);
   await sb.from("terceros").insert({
-    empresa_id:S.empresaId, nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo,
+    empresa_id:S.empresaId, nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo, regimen:d.regimen||"",
     autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"",
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
     tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
@@ -709,6 +729,101 @@ async function guardarCuenta(codigo, nombre, tipo){
   closeModal();
 }
 
+/* ---------- reglas de cuentas (globales) ---------- */
+var REGLAS_HEADERS = ["Documento","Cuenta","Régimen","Débito","Crédito"];
+function tipoDesdeCodigo(codigo){
+  var m={"1":"activo","2":"pasivo","3":"patrimonio","4":"ingreso","5":"gasto","6":"costo"};
+  return m[codigo[0]]||"activo";
+}
+function toBoolCelda(v){
+  if(typeof v==="boolean") return v;
+  var s=String(v==null?"":v).trim().toLowerCase();
+  return s==="1"||s==="true"||s==="si"||s==="sí"||s==="x"||s==="verdadero";
+}
+function descargarPlantillaReglas(){
+  var data = [
+    REGLAS_HEADERS,
+    ["Factura de Venta","413501-VENTAS DE PRODUCTOS","Persona Jurídica","NO","SI"],
+    ["Factura de Venta","240801-IVA GENERADO VENTAS 19%","Persona Jurídica","NO","SI"],
+    ["Factura de Venta","130501-CLIENTES DEUDORES","Persona Jurídica","SI","NO"],
+    ["Factura de Compra","220501-PROVEEDORES NACIONALES","Persona Jurídica","NO","SI"],
+    ["Gasto Arriendo","512001-ARRENDAMIENTOS","Persona Natural No Responsable de IVA","SI","NO"]
+  ];
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = REGLAS_HEADERS.map(function(){return {wch:32};});
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Reglas");
+  XLSX.writeFile(wb, "plantilla_reglas_cuentas.xlsx");
+}
+function handleReglasImportFile(file){
+  S.reglasImportErr=""; S.reglasImportRows=null; render();
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var data = new Uint8Array(e.target.result);
+      var wb = XLSX.read(data, {type:"array"});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var json = XLSX.utils.sheet_to_json(ws, {defval:""});
+      var rows = [];
+      json.forEach(function(row){
+        var doc = String(row["Documento"]||"").trim();
+        var cuentaRaw = String(row["Cuenta"]||"").trim();
+        if(!doc || !cuentaRaw) return;
+        var idx = cuentaRaw.indexOf("-");
+        var codigo = idx>=0 ? cuentaRaw.slice(0,idx).trim() : cuentaRaw;
+        var nombreCta = idx>=0 ? cuentaRaw.slice(idx+1).trim() : "";
+        var regimen = String(row["Régimen"]||"").trim();
+        if(/^n\/?a$/i.test(regimen)) regimen="";
+        rows.push({documento:doc, cuenta_codigo:codigo, cuenta_nombre:nombreCta, regimen:regimen,
+          debito:toBoolCelda(row["Débito"]), credito:toBoolCelda(row["Crédito"]), include:true});
+      });
+      S.reglasImportRows = rows;
+      S.reglasImportFileName = file.name;
+      if(!rows.length) S.reglasImportErr = "No se encontraron filas con Documento y Cuenta.";
+    }catch(err){
+      S.reglasImportErr = "No se pudo leer el archivo: "+err.message;
+    }
+    render();
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function sincronizarCuentasDesdeReglas(reglas){
+  var uniq = {};
+  reglas.forEach(function(r){ if(r.cuenta_codigo) uniq[r.cuenta_codigo]=r.cuenta_nombre; });
+  var codigos = Object.keys(uniq);
+  if(!codigos.length) return;
+  for(var i=0;i<S.empresas.length;i++){
+    var emp = S.empresas[i];
+    var existing = await sb.from("cuentas").select("codigo").eq("empresa_id",emp.id).in("codigo",codigos);
+    var have={}; (existing.data||[]).forEach(function(c){have[c.codigo]=true;});
+    var toAdd = codigos.filter(function(c){return !have[c];}).map(function(c){
+      var tipo = tipoDesdeCodigo(c);
+      return {empresa_id:emp.id, codigo:c, nombre:uniq[c]||c, tipo:tipo, nivel:c.length>=6?2:1, naturaleza:naturaleza(tipo,false), postable:true};
+    });
+    if(toAdd.length) await sb.from("cuentas").insert(toAdd);
+  }
+  if(S.empresaId) await loadCuentas(S.empresaId);
+}
+async function confirmReglasImport(){
+  var rows = (S.reglasImportRows||[]).filter(function(r){return r.include;});
+  if(!rows.length) return;
+  S.reglasImportBusy=true; render();
+  var toInsert = rows.map(function(r){
+    return {documento:r.documento, regimen:r.regimen, cuenta_codigo:r.cuenta_codigo, cuenta_nombre:r.cuenta_nombre, debito:r.debito, credito:r.credito};
+  });
+  var CHUNK=500;
+  for(var i=0;i<toInsert.length;i+=CHUNK){
+    var res = await sb.from("reglas_cuentas").insert(toInsert.slice(i,i+CHUNK));
+    if(res.error){ S.reglasImportBusy=false; render(); alert("Error al importar reglas: "+res.error.message); return; }
+  }
+  await sincronizarCuentasDesdeReglas(toInsert);
+  S.reglasImportBusy=false;
+  S.reglasImportRows=null; S.reglasImportFileName="";
+  S.reglasCuentas = S.reglasCuentas.concat(toInsert);
+  render();
+  alert("Se importaron "+toInsert.length+" regla(s), y se agregaron las cuentas nuevas a todas las empresas.");
+}
+
 /* ---------- importador DIAN ---------- */
 function normDigits(s){ return String(s||"").replace(/\D/g,""); }
 function nitMatches(a,b){
@@ -731,7 +846,35 @@ function excelDateToISO(v){
   if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
   return null;
 }
-function buildDraftFromDianRow(row, empresa, proveedores, terceros, config){
+function montoParaCuenta(codigo, ctx){
+  var c4 = codigo.slice(0,4);
+  if(c4==="1305") return ctx.receivable;
+  if(c4==="1355") return ctx.reteFavor;
+  if(c4==="2205") return ctx.payable;
+  if(c4==="2365") return ctx.reteRenta;
+  if(c4==="2367") return ctx.reteIva;
+  if(c4==="2368") return ctx.reteIca;
+  if(c4==="2408") return ctx.iva;
+  var c1 = codigo[0];
+  if(c1==="4"||c1==="5"||c1==="6") return ctx.neto;
+  return ctx.total;
+}
+function lineasDesdeReglas(documento, regimen, reglas, ctx){
+  if(!reglas || !reglas.length) return null;
+  var matches = reglas.filter(function(r){ return r.documento===documento; });
+  if(!matches.length) return null;
+  var exact = regimen ? matches.filter(function(r){ return r.regimen===regimen; }) : [];
+  var wildcard = matches.filter(function(r){ return !r.regimen; });
+  var rows = exact.length ? exact : wildcard;
+  if(!rows.length) return null;
+  var lineas = rows.map(function(r){
+    var monto = montoParaCuenta(r.cuenta_codigo, ctx);
+    if(!monto) return null;
+    return {cuenta:r.cuenta_codigo, tercero:"", detalle:r.cuenta_nombre, debito:r.debito?monto:0, credito:r.credito?monto:0};
+  }).filter(Boolean);
+  return lineas.length ? lineas : null;
+}
+function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
   var esVenta = nitMatches(row["NIT Emisor"], empresa.nit);
@@ -751,34 +894,47 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config){
   var docRef = (row["Prefijo"]||"")+""+(row["Folio"]||"");
 
   var retNota = "";
-  if(esCompra && terceros && config){
-    var tProv = terceros.find(function(t){ return nitMatches(row["NIT Emisor"], t.identificacion); });
-    if(tProv){
-      if(tProv.autorretenedor){ reteRenta = 0; retNota = " (O-15/O-47, sin retención)"; }
-      else if(tProv.concepto_retencion==="compras" || tProv.concepto_retencion==="arrendamientos"){
-        var base = total - iva;
-        var tasa = tProv.concepto_retencion==="compras" ? config.tasa_compras : config.tasa_arrendamientos;
-        reteRenta = base >= config.base_minima ? Math.round(base * tasa / 100) : 0;
-        retNota = " ("+tProv.concepto_retencion+" "+tasa+"%)";
-      }
+  var tMatch = (terceros||[]).find(function(t){ return nitMatches(esVenta?row["NIT Receptor"]:row["NIT Emisor"], t.identificacion); });
+  if(esCompra && tMatch && config){
+    if(tMatch.autorretenedor){ reteRenta = 0; retNota = " (O-15/O-47, sin retención)"; }
+    else if(tMatch.concepto_retencion==="compras" || tMatch.concepto_retencion==="arrendamientos"){
+      var base = total - iva;
+      var tasa = tMatch.concepto_retencion==="compras" ? config.tasa_compras : config.tasa_arrendamientos;
+      reteRenta = base >= config.base_minima ? Math.round(base * tasa / 100) : 0;
+      retNota = " ("+tMatch.concepto_retencion+" "+tasa+"%)";
     }
   }
 
-  var lineas=[];
-  if(esVenta){
-    var reten = reteIva+reteRenta+reteIca;
-    lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
-    if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
-    lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
-    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
-  } else {
-    lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
-    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
-    var pagoProveedor = total-reteIva-reteRenta-reteIca;
-    lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
-    if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
-    if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
-    if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
+  var lineas=null;
+  if(reglas && reglas.length){
+    var documentoKey = esVenta ? (esNC?"Devolucion en Ventas":"Factura de Venta") :
+      (esNC ? "Devolucion en Compras" : ((tMatch&&tMatch.concepto_retencion==="arrendamientos")?"Gasto Arriendo":"Factura de Compra"));
+    var ctx = {
+      total: total, iva: iva, neto: total-iva,
+      reteFavor: reteIva+reteRenta+reteIca, receivable: total-(reteIva+reteRenta+reteIca),
+      payable: total-reteIva-reteRenta-reteIca, reteIva: reteIva, reteRenta: reteRenta, reteIca: reteIca
+    };
+    lineas = lineasDesdeReglas(documentoKey, tMatch?tMatch.regimen:"", reglas, ctx);
+  }
+  var porReglas = !!lineas;
+
+  if(!lineas){
+    lineas=[];
+    if(esVenta){
+      var reten = reteIva+reteRenta+reteIca;
+      lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
+      if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
+      lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+      if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
+    } else {
+      lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+      if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
+      var pagoProveedor = total-reteIva-reteRenta-reteIca;
+      lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
+      if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
+      if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
+      if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
+    }
   }
   if(esNC){ lineas = lineas.map(function(l){ return {cuenta:l.cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito}; }); }
 
@@ -800,6 +956,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config){
     esVenta: esVenta,
     esNC: esNC,
     esPersonal: esPersonal,
+    porReglas: porReglas,
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
 }
@@ -822,7 +979,7 @@ function handleImportFile(file){
       json.forEach(function(row){
         var estado = String(row["Estado"]||"").toLowerCase();
         if(estado.indexOf("rechaz")>=0 || estado.indexOf("anulad")>=0) return;
-        var d = buildDraftFromDianRow(row, empresa, proveedores, S.terceros, S.config);
+        var d = buildDraftFromDianRow(row, empresa, proveedores, S.terceros, S.config, S.reglasCuentas);
         if(!d) return;
         if(d._error==="fecha"){ skippedFecha++; if(sampleFecha==null) sampleFecha=d.raw; return; }
         d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
@@ -1161,9 +1318,34 @@ function planHTML(e){
       rows += '<tr class="'+cls+'"><td class="acct-code '+indent+'">'+c.codigo+'</td><td class="'+indent+'">'+esc(c.nombre)+'</td><td>'+(c.postable?cap(c.tipo):"")+'</td><td>'+(c.postable?cap(c.naturaleza):"")+'</td></tr>';
     });
   });
-  return topbarHTML() +
+  var body = topbarHTML() +
   '<div class="toolbar"><div class="small">'+S.cuentas.filter(function(c){return c.postable;}).length+' cuentas activas para registrar movimientos</div><button class="btn btn-sm" onclick="app.openNuevaCuenta()">+ Nueva cuenta</button></div>' +
   '<div class="card table-wrap"><table class="data"><thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Naturaleza</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+
+  body += '<div class="card card-pad" style="margin-top:18px">' +
+    '<div class="section-title">Reglas de asignación de cuentas (compartidas por todas las empresas)</div>' +
+    '<p class="small" style="margin-bottom:12px">Define, para cada tipo de documento y régimen del tercero, qué cuenta usar y si va al débito o al crédito. El importador de la DIAN las usa automáticamente en vez de las cuentas genéricas.</p>' +
+    '<div class="btn-row" style="margin-bottom:10px">' +
+      '<button class="btn btn-outline btn-sm" onclick="app.descargarPlantillaReglas()">Descargar plantilla</button>' +
+      '<label class="btn btn-outline btn-sm" style="margin-bottom:0"><input type="file" accept=".xlsx,.xls" style="display:none" onchange="app.onReglasImportFile(this.files[0])">Importar reglas</label>' +
+    '</div>' +
+    '<div class="small">'+S.reglasCuentas.length+' regla(s) cargada(s) actualmente</div>' +
+    (S.reglasImportBusy? '<div class="loading"><div class="spin"></div>Procesando…</div>' : "") +
+    (S.reglasImportErr? '<div class="login-err" style="margin-top:10px">'+esc(S.reglasImportErr)+'</div>' : "");
+
+  if(S.reglasImportRows && S.reglasImportRows.length){
+    var inclR = S.reglasImportRows.filter(function(r){return r.include;}).length;
+    var rowsR = S.reglasImportRows.slice(0,300).map(function(r,i){
+      return '<tr><td><input type="checkbox" '+(r.include?"checked":"")+' onchange="app.toggleReglaImportRow('+i+',this.checked)"></td>' +
+        '<td>'+esc(r.documento)+'</td><td class="mono">'+esc(r.cuenta_codigo)+'</td><td>'+esc(r.cuenta_nombre)+'</td><td>'+esc(r.regimen)+'</td>' +
+        '<td>'+(r.debito?"Débito":"")+(r.credito?"Crédito":"")+'</td></tr>';
+    }).join("");
+    body += '<div class="toolbar" style="margin-top:14px"><div class="small">'+inclR+' de '+S.reglasImportRows.length+' regla(s) seleccionadas'+(S.reglasImportRows.length>300?" (mostrando las primeras 300)":"")+'</div>' +
+      '<button class="btn btn-sm" onclick="app.confirmReglasImport()" '+(inclR&&!S.reglasImportBusy?"":"disabled")+'>Importar seleccionadas</button></div>' +
+      '<div class="table-wrap"><table class="data"><thead><tr><th></th><th>Documento</th><th>Cuenta</th><th>Nombre</th><th>Régimen</th><th>Lado</th></tr></thead><tbody>'+rowsR+'</tbody></table></div>';
+  }
+  body += '</div>';
+  return body;
 }
 function cap(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : ""; }
 
@@ -1371,6 +1553,7 @@ function importarHTML(e){
       if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
       else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
       else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Personal</span>';
+      else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
         '<td>'+fmtDate(r.fecha)+'</td>' +
@@ -1433,6 +1616,7 @@ function nuevaEmpresaModal(){
 }
 var pendingNiif=2;
 
+var REGIMENES = ["","Persona Jurídica","Gran Contribuyente","Persona Natural Responsable de IVA","Persona Natural No Responsable de IVA","Regimen simple de tributacion"];
 var DIAN_DOC_TYPES = [
   ["11","Registro civil de nacimiento"],["12","Tarjeta de identidad"],["13","Cédula de ciudadanía"],
   ["14","Certificado Registraduría (sucesión ilíquida sin doc.)"],["15","Doc. sucesión ilíquida (notaría/juzgado)"],
@@ -1457,7 +1641,8 @@ function nuevoTerceroModal(){
     nombreFields +
     '<div class="field-row"><div class="field"><label>Tipo de documento</label><select id="t-tipodoc">'+docOpts+'</select></div>' +
     '<div class="field"><label>Número identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div></div>' +
-    '<div class="field"><label>Tipo (en Cuadre)</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor" selected>Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div>' +
+    '<div class="field-row"><div class="field"><label>Tipo (en Cuadre)</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor" selected>Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div>' +
+    '<div class="field"><label>Régimen</label><select id="t-regimen">'+REGIMENES.map(function(r){return '<option value="'+r+'">'+(r||"N/A")+'</option>';}).join("")+'</select></div></div>' +
     '<div class="field"><label>Dirección</label><input id="t-direccion" placeholder="Cra / Calle..."></div>' +
     '<div class="field-row3"><div class="field"><label>Municipio</label><input id="t-ciudad"></div>' +
     '<div class="field"><label>Departamento</label><input id="t-departamento"></div>' +
@@ -1549,6 +1734,7 @@ window.app = {
       tipo_documento: document.getElementById("t-tipodoc").value,
       identificacion: document.getElementById("t-ident").value.trim(),
       tipo: document.getElementById("t-tipo").value,
+      regimen: document.getElementById("t-regimen").value,
       autorretenedor: document.getElementById("t-autorretenedor").checked,
       concepto_retencion: document.getElementById("t-concepto").value,
       direccion: document.getElementById("t-direccion").value.trim(),
@@ -1571,6 +1757,10 @@ window.app = {
     var bm=parseFloat(document.getElementById("cfg-bm").value)||0;
     guardarConfig(uvt,tc,ta,bm);
   },
+  descargarPlantillaReglas: descargarPlantillaReglas,
+  onReglasImportFile: function(file){ if(!file) return; handleReglasImportFile(file); },
+  toggleReglaImportRow: function(i,val){ S.reglasImportRows[i].include=val; render(); },
+  confirmReglasImport: confirmReglasImport,
 
   openNuevaCuenta: function(){ openModal(nuevaCuentaModal()); },
   submitCuenta: function(){
