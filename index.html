@@ -859,33 +859,18 @@ function excelDateToISO(v){
   if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
   return null;
 }
-function montoParaCuenta(codigo, ctx){
+function slotDeCuenta(codigo){
   var c4 = codigo.slice(0,4);
-  if(c4==="1305") return ctx.receivable;
-  if(c4==="1355") return ctx.reteFavor;
-  if(c4==="2205") return ctx.payable;
-  if(c4==="2365") return ctx.reteRenta;
-  if(c4==="2367") return ctx.reteIva;
-  if(c4==="2368") return ctx.reteIca;
-  if(c4==="2408") return ctx.iva;
+  if(c4==="1305") return "receivable";
+  if(c4==="1355") return "retFavor";
+  if(c4==="2205") return "payable";
+  if(c4==="2365") return "reteRenta";
+  if(c4==="2367") return "reteIva";
+  if(c4==="2368") return "reteIca";
+  if(c4==="2408") return "iva";
   var c1 = codigo[0];
-  if(c1==="4"||c1==="5"||c1==="6") return ctx.neto;
-  return ctx.total;
-}
-function lineasDesdeReglas(documento, regimen, reglas, ctx){
-  if(!reglas || !reglas.length) return null;
-  var matches = reglas.filter(function(r){ return r.documento===documento; });
-  if(!matches.length) return null;
-  var exact = regimen ? matches.filter(function(r){ return r.regimen===regimen; }) : [];
-  var wildcard = matches.filter(function(r){ return !r.regimen; });
-  var rows = exact.length ? exact : wildcard;
-  if(!rows.length) return null;
-  var lineas = rows.map(function(r){
-    var monto = montoParaCuenta(r.cuenta_codigo, ctx);
-    if(!monto) return null;
-    return {cuenta:r.cuenta_codigo, tercero:"", detalle:r.cuenta_nombre, debito:r.debito?monto:0, credito:r.credito?monto:0};
-  }).filter(Boolean);
-  return lineas.length ? lineas : null;
+  if(c1==="4"||c1==="5"||c1==="6") return "main";
+  return "otro";
 }
 function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
@@ -918,40 +903,39 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     }
   }
 
-  var lineas=null;
+  var lineas=[];
+  if(esVenta){
+    var reten = reteIva+reteRenta+reteIca;
+    lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
+    if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
+    lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
+  } else {
+    lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
+    var pagoProveedor = total-reteIva-reteRenta-reteIca;
+    lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
+    if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
+    if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
+    if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
+  }
+
+  var porReglas = false;
   if(reglas && reglas.length){
     var documentoKey = esVenta ? (esNC?"Devolucion en Ventas":"Factura de Venta") :
       (esNC ? "Devolucion en Compras" : ((tMatch&&tMatch.concepto_retencion==="arrendamientos")?"Gasto Arriendo":"Factura de Compra"));
-    var ctx = {
-      total: total, iva: iva, neto: total-iva,
-      reteFavor: reteIva+reteRenta+reteIca, receivable: total-(reteIva+reteRenta+reteIca),
-      payable: total-reteIva-reteRenta-reteIca, reteIva: reteIva, reteRenta: reteRenta, reteIca: reteIca
-    };
-    lineas = lineasDesdeReglas(documentoKey, tMatch?tMatch.regimen:"", reglas, ctx);
-    if(lineas){
-      var totR = totalsOf(lineas);
-      if(Math.abs(totR.d-totR.c)>=1) lineas = null;
-    }
-  }
-  var porReglas = !!lineas;
-
-  if(!lineas){
-    lineas=[];
-    if(esVenta){
-      var reten = reteIva+reteRenta+reteIca;
-      lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
-      if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
-      lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
-      if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
-    } else {
-      lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
-      if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
-      var pagoProveedor = total-reteIva-reteRenta-reteIca;
-      lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
-      if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
-      if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
-      if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
-    }
+    var regimenBuscado = tMatch?tMatch.regimen:"";
+    var matches = reglas.filter(function(r){ return r.documento===documentoKey; });
+    var exact = regimenBuscado ? matches.filter(function(r){ return r.regimen===regimenBuscado; }) : [];
+    var aplicables = exact.length ? exact : matches.filter(function(r){ return !r.regimen; });
+    aplicables.forEach(function(r){
+      var slot = slotDeCuenta(r.cuenta_codigo);
+      var idx = lineas.findIndex(function(l){ return slotDeCuenta(l.cuenta)===slot; });
+      if(idx>=0){
+        lineas[idx] = {cuenta:r.cuenta_codigo, tercero:"", detalle:r.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
+        porReglas = true;
+      }
+    });
   }
 
   var esContado = String(row["Forma de Pago"]||"").trim()==="1";
