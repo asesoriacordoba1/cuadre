@@ -932,6 +932,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     var aplicables = exact.length ? exact : matches.filter(function(r){ return !r.regimen; });
     aplicables.forEach(function(r){
       var slot = slotDeCuenta(r.cuenta_codigo);
+      if(slot==="otro") return;
       var idx = lineas.findIndex(function(l){ return slotDeCuenta(l.cuenta)===slot; });
       if(idx>=0){
         lineas[idx] = {cuenta:r.cuenta_codigo, tercero:"", detalle:r.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
