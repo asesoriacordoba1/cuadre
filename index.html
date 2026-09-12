@@ -299,7 +299,10 @@ var S = {
   importProgress:null,
   cleanupGroups:null,
   cleanupBusy:false,
-  config:null
+  config:null,
+  tercImportRows:null,
+  tercImportFileName:"",
+  tercImportErr:""
 };
 
 function fmtCOP(n){
@@ -585,6 +588,67 @@ async function guardarTercero(nombre, ident, tipo, autorretenedor, concepto){
 async function eliminarTercero(id){
   if(!confirm("¿Eliminar este tercero?")) return;
   await sb.from("terceros").delete().eq("id",id);
+}
+
+/* ---------- importar terceros masivo ---------- */
+function descargarPlantillaTerceros(){
+  var data = [
+    ["Nombre","Identificación","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos)"],
+    ["Johny Andrés Giraldo Marín","1037111222","proveedor","NO","compras"],
+    ["Arrendador Ejemplo S.A.S.","900111222","proveedor","NO","arrendamientos"],
+    ["Proveedor Régimen Simple","900333444","proveedor","SI",""]
+  ];
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [{wch:30},{wch:16},{wch:12},{wch:20},{wch:36}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Terceros");
+  XLSX.writeFile(wb, "plantilla_terceros.xlsx");
+}
+var TIPOS_VALIDOS = ["cliente","proveedor","empleado","otro"];
+function handleTercerosImportFile(file){
+  S.tercImportErr=""; S.tercImportRows=null; render();
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var data = new Uint8Array(e.target.result);
+      var wb = XLSX.read(data, {type:"array"});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var json = XLSX.utils.sheet_to_json(ws, {defval:""});
+      var existing = {}; S.terceros.forEach(function(t){ if(t.identificacion) existing[normDigits(t.identificacion)]=true; });
+      var rows = [];
+      json.forEach(function(row){
+        var nombre = String(row["Nombre"]||"").trim();
+        if(!nombre) return;
+        var ident = String(row["Identificación"]||"").trim();
+        var tipo = String(row["Tipo"]||"proveedor").trim().toLowerCase();
+        if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
+        var sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
+        var conc = String(row["Concepto retención (compras/arrendamientos)"]||"").trim().toLowerCase();
+        if(conc!=="compras" && conc!=="arrendamientos") conc="";
+        var dup = !!(ident && existing[normDigits(ident)]);
+        rows.push({nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc, dup:dup, include:!dup});
+      });
+      S.tercImportRows = rows;
+      S.tercImportFileName = file.name;
+      if(!rows.length) S.tercImportErr = "No se encontraron filas con Nombre en el archivo.";
+    }catch(err){
+      S.tercImportErr = "No se pudo leer el archivo: "+err.message;
+    }
+    render();
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function confirmTercImport(){
+  var rows = (S.tercImportRows||[]).filter(function(r){return r.include;});
+  if(!rows.length) return;
+  var toInsert = rows.map(function(r){
+    return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion};
+  });
+  var res = await sb.from("terceros").insert(toInsert);
+  if(res.error){ alert("Error al importar: "+res.error.message); return; }
+  S.tercImportRows=null; S.tercImportFileName="";
+  render();
+  alert("Se importaron "+toInsert.length+" terceros.");
 }
 
 /* ---------- cuentas ---------- */
@@ -1077,10 +1141,33 @@ function tercerosHTML(e){
   var rows = S.terceros.map(function(t){
     return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="5" class="small" style="padding:16px 10px">No hay terceros registrados.</td></tr>';
-  return topbarHTML() +
+  var body = topbarHTML() +
   ajustesRetencionHTML() +
-  '<div class="toolbar"><div class="small">'+S.terceros.length+' terceros</div><button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button></div>' +
+  '<div class="toolbar"><div class="small">'+S.terceros.length+' terceros</div><div class="btn-row">' +
+    '<button class="btn btn-outline btn-sm" onclick="app.descargarPlantillaTerceros()">Descargar plantilla</button>' +
+    '<label class="btn btn-outline btn-sm" style="margin-bottom:0"><input type="file" accept=".xlsx,.xls" style="display:none" onchange="app.onTercerosImportFile(this.files[0])">Importar terceros</label>' +
+    '<button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button>' +
+  '</div></div>' +
   '<div class="card table-wrap"><table class="data"><thead><tr><th>Nombre</th><th>Identificación</th><th>Tipo</th><th>Retención</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+
+  if(S.tercImportErr) body += '<div class="login-err" style="margin-top:10px">'+esc(S.tercImportErr)+'</div>';
+  if(S.tercImportRows && S.tercImportRows.length){
+    var incl = S.tercImportRows.filter(function(r){return r.include;}).length;
+    var rows3 = S.tercImportRows.map(function(r,i){
+      var flag = r.dup ? '<span class="chip chip-warn"><span class="chip-dot"></span>Ya existe</span>' : "";
+      return '<tr>' +
+        '<td><input type="checkbox" '+(r.include?"checked":"")+' onchange="app.toggleTercImportRow('+i+',this.checked)"></td>' +
+        '<td>'+esc(r.nombre)+'</td><td class="mono">'+esc(r.identificacion)+'</td><td>'+cap(r.tipo)+'</td>' +
+        '<td>'+(r.autorretenedor?'Sin retención':(r.concepto_retencion||"—"))+'</td><td>'+flag+'</td>' +
+      '</tr>';
+    }).join("");
+    body += '<div class="card card-pad" style="margin-top:16px">' +
+      '<div class="toolbar"><div class="small">'+incl+' de '+S.tercImportRows.length+' terceros seleccionados de "'+esc(S.tercImportFileName)+'"</div>' +
+      '<button class="btn btn-sm" onclick="app.confirmTercImport()" '+(incl?"":"disabled")+'>Importar seleccionados</button></div>' +
+      '<div class="table-wrap"><table class="data"><thead><tr><th></th><th>Nombre</th><th>Identificación</th><th>Tipo</th><th>Retención</th><th></th></tr></thead><tbody>'+rows3+'</tbody></table></div>' +
+    '</div>';
+  }
+  return body;
 }
 
 function comprobantesHTML(e){
@@ -1386,6 +1473,10 @@ window.app = {
     guardarTercero(n,i,t,auto,conc);
   },
   eliminarTercero: eliminarTercero,
+  descargarPlantillaTerceros: descargarPlantillaTerceros,
+  onTercerosImportFile: function(file){ if(!file) return; handleTercerosImportFile(file); },
+  toggleTercImportRow: function(i,val){ S.tercImportRows[i].include=val; render(); },
+  confirmTercImport: confirmTercImport,
   guardarAjustes: function(){
     var uvt=parseFloat(document.getElementById("cfg-uvt").value)||0;
     var tc=parseFloat(document.getElementById("cfg-tc").value)||0;
