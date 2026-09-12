@@ -626,6 +626,19 @@ async function guardarTercero(d){
   });
   closeModal();
 }
+async function actualizarTercero(id, d){
+  var nombre = nombreCompletoTercero(d);
+  await sb.from("terceros").update({
+    nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo, regimen:d.regimen||"",
+    autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"",
+    direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
+    tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
+    primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
+    primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||""
+  }).eq("id", id);
+  editingTerceroId = null;
+  closeModal();
+}
 async function eliminarTercero(id){
   if(!confirm("¿Eliminar este tercero?")) return;
   await sb.from("terceros").delete().eq("id",id);
@@ -1382,7 +1395,7 @@ function ajustesRetencionHTML(){
 function tercerosHTML(e){
   var rows = S.terceros.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
-    return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
+    return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros registrados.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
@@ -1636,13 +1649,17 @@ var DIAN_DOC_TYPES = [
   ["46","Carné diplomático"]
 ];
 var pendingEsJuridica = true;
+var editingTerceroId = null;
+function selOpt(value, current){ return value===current ? " selected" : ""; }
 function nuevoTerceroModal(){
-  var docOpts = DIAN_DOC_TYPES.map(function(d){return '<option value="'+d[0]+'">'+d[0]+' - '+d[1]+'</option>';}).join("");
+  var t = editingTerceroId ? (S.terceros.find(function(x){return x.id===editingTerceroId;})||{}) : {};
+  var docOpts = DIAN_DOC_TYPES.map(function(d){return '<option value="'+d[0]+'"'+selOpt(d[0],t.tipo_documento||"31")+'>'+d[0]+' - '+d[1]+'</option>';}).join("");
   var nombreFields = pendingEsJuridica ?
-    '<div class="field"><label>Razón social</label><input id="t-razon" placeholder="Nombre de la empresa"></div>' :
-    '<div class="field-row"><div class="field"><label>Primer apellido</label><input id="t-ap1"></div><div class="field"><label>Segundo apellido</label><input id="t-ap2"></div></div>' +
-    '<div class="field-row"><div class="field"><label>Primer nombre</label><input id="t-nom1"></div><div class="field"><label>Otros nombres</label><input id="t-nom2"></div></div>';
-  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:480px"><div class="modal-head"><h3>Nuevo tercero</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+    '<div class="field"><label>Razón social</label><input id="t-razon" value="'+esc(t.razon_social||"")+'" placeholder="Nombre de la empresa"></div>' :
+    '<div class="field-row"><div class="field"><label>Primer apellido</label><input id="t-ap1" value="'+esc(t.primer_apellido||"")+'"></div><div class="field"><label>Segundo apellido</label><input id="t-ap2" value="'+esc(t.segundo_apellido||"")+'"></div></div>' +
+    '<div class="field-row"><div class="field"><label>Primer nombre</label><input id="t-nom1" value="'+esc(t.primer_nombre||"")+'"></div><div class="field"><label>Otros nombres</label><input id="t-nom2" value="'+esc(t.otros_nombres||"")+'"></div></div>';
+  var tipoOpts = ["cliente","proveedor","empleado","otro"].map(function(v){return '<option value="'+v+'"'+selOpt(v,t.tipo||"proveedor")+'>'+cap(v)+'</option>';}).join("");
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:480px"><div class="modal-head"><h3>'+(editingTerceroId?"Editar tercero":"Nuevo tercero")+'</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
   '<div class="modal-body">' +
     '<div class="radio-group" style="margin-bottom:13px">' +
       '<div class="radio-opt'+(pendingEsJuridica?" sel":"")+'" onclick="app.setEsJuridica(true)">Persona jurídica</div>' +
@@ -1650,17 +1667,17 @@ function nuevoTerceroModal(){
     '</div>' +
     nombreFields +
     '<div class="field-row"><div class="field"><label>Tipo de documento</label><select id="t-tipodoc">'+docOpts+'</select></div>' +
-    '<div class="field"><label>Número identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div></div>' +
-    '<div class="field-row"><div class="field"><label>Tipo (en Cuadre)</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor" selected>Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div>' +
-    '<div class="field"><label>Régimen</label><select id="t-regimen">'+REGIMENES.map(function(r){return '<option value="'+r+'">'+(r||"N/A")+'</option>';}).join("")+'</select></div></div>' +
-    '<div class="field"><label>Dirección</label><input id="t-direccion" placeholder="Cra / Calle..."></div>' +
-    '<div class="field-row3"><div class="field"><label>Municipio</label><input id="t-ciudad"></div>' +
-    '<div class="field"><label>Departamento</label><input id="t-departamento"></div>' +
-    '<div class="field"><label>País</label><input id="t-pais" value="Colombia"></div></div>' +
+    '<div class="field"><label>Número identificación</label><input id="t-ident" value="'+esc(t.identificacion||"")+'" placeholder="C.C. / NIT"></div></div>' +
+    '<div class="field-row"><div class="field"><label>Tipo (en Cuadre)</label><select id="t-tipo">'+tipoOpts+'</select></div>' +
+    '<div class="field"><label>Régimen</label><select id="t-regimen">'+REGIMENES.map(function(r){return '<option value="'+r+'"'+selOpt(r,t.regimen||"")+'>'+(r||"N/A")+'</option>';}).join("")+'</select></div></div>' +
+    '<div class="field"><label>Dirección</label><input id="t-direccion" value="'+esc(t.direccion||"")+'" placeholder="Cra / Calle..."></div>' +
+    '<div class="field-row3"><div class="field"><label>Municipio</label><input id="t-ciudad" value="'+esc(t.ciudad||"")+'"></div>' +
+    '<div class="field"><label>Departamento</label><input id="t-departamento" value="'+esc(t.departamento||"")+'"></div>' +
+    '<div class="field"><label>País</label><input id="t-pais" value="'+esc(t.pais||"Colombia")+'"></div></div>' +
     '<div class="field" style="background:var(--surface-2);border-radius:8px;padding:10px;margin-top:2px">' +
-      '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"> No se le practica retención (responsabilidad O-15 Autorretenedor u O-47 Régimen Simple)</label>' +
+      '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"'+(t.autorretenedor?" checked":"")+'> No se le practica retención (responsabilidad O-15 Autorretenedor u O-47 Régimen Simple)</label>' +
       '<label>Concepto de retención (si no es autorretenedor)</label>' +
-      '<select id="t-concepto"><option value="">Ninguno</option><option value="compras">Compras (2.5%)</option><option value="arrendamientos">Arrendamientos (3.5%)</option></select>' +
+      '<select id="t-concepto"><option value=""'+selOpt("",t.concepto_retencion||"")+'>Ninguno</option><option value="compras"'+selOpt("compras",t.concepto_retencion||"")+'>Compras (2.5%)</option><option value="arrendamientos"'+selOpt("arrendamientos",t.concepto_retencion||"")+'>Arrendamientos (3.5%)</option></select>' +
     '</div>' +
   '</div><div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitTercero()">Guardar</button></div></div></div>';
 }
@@ -1731,7 +1748,13 @@ window.app = {
   crearDemo: crearEmpresaDemo,
   eliminarDemo: eliminarEmpresaDemo,
 
-  openNuevoTercero: function(){ pendingEsJuridica=true; openModal(nuevoTerceroModal()); },
+  openNuevoTercero: function(){ pendingEsJuridica=true; editingTerceroId=null; openModal(nuevoTerceroModal()); },
+  openEditarTercero: function(id){
+    var t = S.terceros.find(function(x){return x.id===id;});
+    if(!t) return;
+    editingTerceroId = id; pendingEsJuridica = !!t.es_juridica;
+    openModal(nuevoTerceroModal());
+  },
   setEsJuridica: function(v){ pendingEsJuridica=v; openModal(nuevoTerceroModal()); },
   submitTercero: function(){
     var d = {
@@ -1753,7 +1776,8 @@ window.app = {
       pais: document.getElementById("t-pais").value.trim()
     };
     if(!nombreCompletoTercero(d)){ alert(pendingEsJuridica?"Escribe la razón social.":"Escribe al menos el primer nombre y primer apellido."); return; }
-    guardarTercero(d);
+    if(editingTerceroId) actualizarTercero(editingTerceroId, d);
+    else guardarTercero(d);
   },
   eliminarTercero: eliminarTercero,
   descargarPlantillaTerceros: descargarPlantillaTerceros,
