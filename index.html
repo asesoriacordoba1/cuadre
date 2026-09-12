@@ -182,6 +182,7 @@ a.link:hover{text-decoration:underline}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 (function(){
 "use strict";
@@ -217,6 +218,7 @@ var PUC = [
  ["2335","Costos y gastos por pagar","pasivo",1],
  ["2365","Retención en la fuente por pagar","pasivo",1],
  ["2367","Impuesto a las ventas retenido - Reteiva","pasivo",1],
+ ["2368","Retención de industria y comercio por pagar","pasivo",1],
  ["24","IMPUESTOS, GRAVÁMENES Y TASAS","pasivo",0],
  ["2404","De renta y complementarios","pasivo",1],
  ["2408","Impuesto sobre las ventas por pagar - IVA","pasivo",1],
@@ -289,7 +291,11 @@ var S = {
   libroSub:"diario",
   periodo:null,
   channels:[],
-  empresaChannels:[]
+  empresaChannels:[],
+  importRows:null,
+  importFileName:"",
+  importBusy:false,
+  importErr:""
 };
 
 function fmtCOP(n){
@@ -555,6 +561,143 @@ async function guardarCuenta(codigo, nombre, tipo){
   closeModal();
 }
 
+/* ---------- importador DIAN ---------- */
+function normDigits(s){ return String(s||"").replace(/\D/g,""); }
+function nitMatches(a,b){
+  var x=normDigits(a), y=normDigits(b);
+  if(!x||!y) return false;
+  if(x===y) return true;
+  if(Math.abs(x.length-y.length)===1){
+    var longer = x.length>y.length?x:y, shorter=x.length>y.length?y:x;
+    return longer.slice(0,shorter.length)===shorter;
+  }
+  return false;
+}
+function excelDateToISO(v){
+  if(!v) return todayISO();
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[1]+"-"+m[2]+"-"+m[3];
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return m[3]+"-"+String(m[1]).padStart(2,"0")+"-"+String(m[2]).padStart(2,"0");
+  return todayISO();
+}
+function buildDraftFromDianRow(row, empresa){
+  var tipoDocRaw = String(row["Tipo de documento"]||"");
+  var esNC = /cr[eé]dito/i.test(tipoDocRaw);
+  var esVenta = nitMatches(row["NIT Emisor"], empresa.nit);
+  var esCompra = !esVenta && nitMatches(row["NIT Receptor"], empresa.nit);
+  if(!esVenta && !esCompra) return null;
+
+  var total = Number(row["Total"])||0;
+  if(total<=0) return null;
+  var iva = Number(row["IVA"])||0;
+  var reteIva = Number(row["Rete IVA"])||0;
+  var reteRenta = Number(row["Rete Renta"])||0;
+  var reteIca = Number(row["Rete ICA"])||0;
+  var fecha = excelDateToISO(row["Fecha Emisión"]);
+  var cufe = row["CUFE/CUDE"]||"";
+  var tercNombre = esVenta ? (row["Nombre Receptor"]||"") : (row["Nombre Emisor"]||"");
+  var docRef = (row["Prefijo"]||"")+""+(row["Folio"]||"");
+
+  var lineas=[];
+  if(esVenta){
+    var reten = reteIva+reteRenta+reteIca;
+    lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
+    if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
+    lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
+  } else {
+    lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
+    var pagoProveedor = total-reteIva-reteRenta-reteIca;
+    lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
+    if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente", debito:0, credito:reteRenta});
+    if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
+    if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
+  }
+  if(esNC){ lineas = lineas.map(function(l){ return {cuenta:l.cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito}; }); }
+
+  var tot = totalsOf(lineas);
+  return {
+    tipo: esVenta? "FV":"FC",
+    fecha: fecha,
+    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")",
+    lineas: lineas,
+    cufe: cufe,
+    tercNombre: tercNombre,
+    total: total,
+    esVenta: esVenta,
+    esNC: esNC,
+    debeCuadra: Math.abs(tot.d-tot.c)<1
+  };
+}
+function handleImportFile(file){
+  S.importBusy=true; S.importErr=""; S.importRows=null; render();
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var data = new Uint8Array(e.target.result);
+      var wb = XLSX.read(data, {type:"array", cellDates:true});
+      var sheetName = wb.SheetNames.find(function(n){return /^Rp_Doc/i.test(n);}) || wb.SheetNames[0];
+      var ws = wb.Sheets[sheetName];
+      var json = XLSX.utils.sheet_to_json(ws, {defval:""});
+      var empresa = currentEmpresa();
+      var existingCufes = {}; S.comprobantes.forEach(function(c){ if(c.cufe) existingCufes[c.cufe]=true; });
+      var seenInFile = {};
+      var drafts=[];
+      json.forEach(function(row){
+        var estado = String(row["Estado"]||"").toLowerCase();
+        if(estado.indexOf("rechaz")>=0 || estado.indexOf("anulad")>=0) return;
+        var d = buildDraftFromDianRow(row, empresa);
+        if(!d) return;
+        d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
+        if(d.cufe) seenInFile[d.cufe]=true;
+        d.include = !d.dup;
+        drafts.push(d);
+      });
+      S.importRows = drafts;
+      S.importFileName = file.name;
+      if(!drafts.length) S.importErr = "No se encontraron documentos de esta empresa en el archivo. Verifica que el NIT de la empresa esté bien escrito en Cuadre.";
+    }catch(err){
+      S.importErr = "No se pudo leer el archivo: "+err.message;
+    }
+    S.importBusy=false; render();
+  };
+  reader.onerror=function(){ S.importErr="No se pudo leer el archivo."; S.importBusy=false; render(); };
+  reader.readAsArrayBuffer(file);
+}
+async function confirmImport(){
+  var rows = (S.importRows||[]).filter(function(r){return r.include && r.debeCuadra;});
+  if(!rows.length){ alert("No hay filas seleccionadas para importar."); return; }
+  S.importBusy=true; render();
+  var counters={};
+  function nextNum(tipo,periodo){
+    var key=tipo+"|"+periodo;
+    if(counters[key]==null){
+      var max=0;
+      S.comprobantes.forEach(function(c){ if(c.tipo===tipo && c.periodo===periodo){ var n=parseInt((c._id||"").split("-").pop(),10); if(n>max) max=n; } });
+      counters[key]=max;
+    }
+    counters[key]++;
+    return tipo+"-"+periodo+"-"+String(counters[key]).padStart(4,"0");
+  }
+  var toInsert = rows.map(function(r){
+    var periodo = r.fecha.slice(0,7);
+    var numero = nextNum(r.tipo, periodo);
+    var tot = totalsOf(r.lineas);
+    return {empresa_id:S.empresaId, numero:numero, tipo:r.tipo, fecha:r.fecha, periodo:periodo, descripcion:r.descripcion, lineas:r.lineas, total_debito:tot.d, total_credito:tot.c, estado:"contabilizado", cufe:r.cufe||null};
+  });
+  var res = await sb.from("comprobantes").insert(toInsert);
+  S.importBusy=false;
+  if(res.error){ alert("Error al importar: "+res.error.message); render(); return; }
+  var n=toInsert.length;
+  S.importRows=null; S.importFileName="";
+  render();
+  alert("Se importaron "+n+" comprobantes. Revísalos en la pestaña Comprobantes (las compras traen una cuenta de gasto genérica que puedes reclasificar).");
+}
+
 /* ---------- periodos ---------- */
 async function cerrarPeriodoDb(p, td, tc){
   await sb.from("periodos").upsert({empresa_id:S.empresaId, periodo:p, estado:"cerrado", fecha_cierre:todayISO(), total_debito:td, total_credito:tc},{onConflict:"empresa_id,periodo"});
@@ -677,6 +820,7 @@ function sidebarHTML(){
       navItem("plan","▤","Plan de cuentas") +
       navItem("terceros","◍","Terceros") +
       navItem("comprobantes","▥","Comprobantes") +
+      navItem("importar","⇩","Importar DIAN") +
       navItem("libros","▦","Libros y estados") +
       navItem("periodos","◔","Periodos") +
     '</div>' +
@@ -699,18 +843,19 @@ function mainHTML(){
   else if(S.tab==="comprobantes") body=comprobantesHTML(e);
   else if(S.tab==="libros") body=librosHTML(e);
   else if(S.tab==="periodos") body=periodosHTML(e);
+  else if(S.tab==="importar") body=importarHTML(e);
 
   var demoBanner = e.demo ? '<div class="banner"><span>Estás viendo <b>datos de ejemplo</b> para conocer el sistema. Crea tu propia empresa cuando quieras.</span><button onclick="app.eliminarDemo()">Quitar ejemplo</button></div>' : "";
 
   return '<div class="main">' + demoBanner + body + '</div>';
 }
 
-var TAB_TITLES={dashboard:["Panel","Resumen de la empresa"],plan:["Plan de cuentas","Catálogo contable configurable por grupo NIIF"],terceros:["Terceros","Clientes, proveedores y empleados"],comprobantes:["Comprobantes","Registro de movimientos contables"],libros:["Libros y estados financieros","Generados automáticamente a partir de tus comprobantes"],periodos:["Periodos","Cierre mensual con validaciones"]};
+var TAB_TITLES={dashboard:["Panel","Resumen de la empresa"],plan:["Plan de cuentas","Catálogo contable configurable por grupo NIIF"],terceros:["Terceros","Clientes, proveedores y empleados"],comprobantes:["Comprobantes","Registro de movimientos contables"],libros:["Libros y estados financieros","Generados automáticamente a partir de tus comprobantes"],periodos:["Periodos","Cierre mensual con validaciones"],importar:["Importar DIAN","Sube el reporte de documentos electrónicos y arma los comprobantes automáticamente"]};
 
 function topbarHTML(){
   var t = TAB_TITLES[S.tab];
   var periodos = distinctPeriodos();
-  var showPeriodo = S.tab!=="plan" && S.tab!=="terceros" && S.tab!=="periodos";
+  var showPeriodo = S.tab!=="plan" && S.tab!=="terceros" && S.tab!=="periodos" && S.tab!=="importar";
   var sel = showPeriodo ? ('<div class="period-switch"><select onchange="app.setPeriodo(this.value)">'+
     periodos.map(function(p){return '<option value="'+p+'"'+(p===S.periodo?" selected":"")+'>'+periodoLabel(p)+'</option>';}).join("")+
     '</select></div>') : "";
@@ -928,6 +1073,38 @@ function periodosHTML(e){
   '<p class="small" style="margin-top:10px">Cerrar un periodo valida que débitos = créditos, y bloquea nuevos cambios en ese mes.</p>';
 }
 
+function importarHTML(e){
+  var body = '<div class="card card-pad">' +
+    '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
+    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras.</p>' +
+    '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
+    (S.importBusy? '<div class="loading"><div class="spin"></div>Procesando…</div>' : "") +
+    (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
+  '</div>';
+
+  if(S.importRows && S.importRows.length){
+    var incluidos = S.importRows.filter(function(r){return r.include;}).length;
+    var rows = S.importRows.map(function(r,i){
+      var flags = "";
+      if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
+      else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
+      return '<tr>' +
+        '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
+        '<td>'+fmtDate(r.fecha)+'</td>' +
+        '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
+        '<td>'+esc(r.tercNombre)+'</td>' +
+        '<td class="num">'+fmtCOP(r.total)+'</td>' +
+        '<td>'+flags+'</td>' +
+      '</tr>';
+    }).join("");
+    body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
+      '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos?"":"disabled")+'>Importar seleccionados</button></div>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th class="num">Total</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar.</p>';
+  }
+  return body;
+}
+
 /* ---------- modals: empresa ---------- */
 function nuevaEmpresaModal(){
   return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal"><div class="modal-head"><h3>Nueva empresa</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
@@ -1090,7 +1267,11 @@ window.app = {
   reabrirPeriodo: function(p){
     if(!confirm("¿Reabrir "+periodoLabel(p)+"?")) return;
     reabrirPeriodoDb(p);
-  }
+  },
+
+  onImportFile: function(file){ if(!file) return; handleImportFile(file); },
+  toggleImportRow: function(i,val){ S.importRows[i].include = val; render(); },
+  confirmImport: confirmImport
 };
 
 boot();
