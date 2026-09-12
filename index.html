@@ -581,8 +581,9 @@ async function eliminarComprobante(numero){
 }
 
 /* ---------- terceros ---------- */
-async function guardarTercero(nombre, ident, tipo, autorretenedor, concepto){
-  await sb.from("terceros").insert({empresa_id:S.empresaId, nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:!!autorretenedor, concepto_retencion:concepto||""});
+async function guardarTercero(nombre, ident, tipo, autorretenedor, concepto, direccion, ciudad, departamento, pais){
+  await sb.from("terceros").insert({empresa_id:S.empresaId, nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:!!autorretenedor, concepto_retencion:concepto||"",
+    direccion:direccion||"", ciudad:ciudad||"", departamento:departamento||"", pais:pais||"Colombia"});
   closeModal();
 }
 async function eliminarTercero(id){
@@ -593,13 +594,13 @@ async function eliminarTercero(id){
 /* ---------- importar terceros masivo ---------- */
 function descargarPlantillaTerceros(){
   var data = [
-    ["Nombre","Identificación","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos)"],
-    ["Johny Andrés Giraldo Marín","1037111222","proveedor","NO","compras"],
-    ["Arrendador Ejemplo S.A.S.","900111222","proveedor","NO","arrendamientos"],
-    ["Proveedor Régimen Simple","900333444","proveedor","SI",""]
+    ["Nombre","Identificación","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos)","Dirección","Ciudad","Departamento","País"],
+    ["Johny Andrés Giraldo Marín","1037111222","proveedor","NO","compras","Cra 5 # 10-20","Montería","Córdoba","Colombia"],
+    ["Arrendador Ejemplo S.A.S.","900111222","proveedor","NO","arrendamientos","Cll 20 # 5-15","Cartagena","Bolívar","Colombia"],
+    ["Proveedor Régimen Simple","900333444","proveedor","SI","","","","",""]
   ];
   var ws = XLSX.utils.aoa_to_sheet(data);
-  ws["!cols"] = [{wch:30},{wch:16},{wch:12},{wch:20},{wch:36}];
+  ws["!cols"] = [{wch:30},{wch:16},{wch:12},{wch:20},{wch:36},{wch:24},{wch:16},{wch:16},{wch:14}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
   XLSX.writeFile(wb, "plantilla_terceros.xlsx");
@@ -626,7 +627,10 @@ function handleTercerosImportFile(file){
         var conc = String(row["Concepto retención (compras/arrendamientos)"]||"").trim().toLowerCase();
         if(conc!=="compras" && conc!=="arrendamientos") conc="";
         var dup = !!(ident && existing[normDigits(ident)]);
-        rows.push({nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc, dup:dup, include:!dup});
+        rows.push({nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc,
+          direccion:String(row["Dirección"]||"").trim(), ciudad:String(row["Ciudad"]||"").trim(),
+          departamento:String(row["Departamento"]||"").trim(), pais:String(row["País"]||"").trim()||"Colombia",
+          dup:dup, include:!dup});
       });
       S.tercImportRows = rows;
       S.tercImportFileName = file.name;
@@ -642,7 +646,8 @@ async function confirmTercImport(){
   var rows = (S.tercImportRows||[]).filter(function(r){return r.include;});
   if(!rows.length) return;
   var toInsert = rows.map(function(r){
-    return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion};
+    return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion,
+      direccion:r.direccion, ciudad:r.ciudad, departamento:r.departamento, pais:r.pais};
   });
   var res = await sb.from("terceros").insert(toInsert);
   if(res.error){ alert("Error al importar: "+res.error.message); return; }
@@ -1139,8 +1144,9 @@ function ajustesRetencionHTML(){
 }
 function tercerosHTML(e){
   var rows = S.terceros.map(function(t){
-    return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
-  }).join("") || '<tr><td colspan="5" class="small" style="padding:16px 10px">No hay terceros registrados.</td></tr>';
+    var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
+    return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
+  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros registrados.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
   '<div class="toolbar"><div class="small">'+S.terceros.length+' terceros</div><div class="btn-row">' +
@@ -1148,7 +1154,7 @@ function tercerosHTML(e){
     '<label class="btn btn-outline btn-sm" style="margin-bottom:0"><input type="file" accept=".xlsx,.xls" style="display:none" onchange="app.onTercerosImportFile(this.files[0])">Importar terceros</label>' +
     '<button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button>' +
   '</div></div>' +
-  '<div class="card table-wrap"><table class="data"><thead><tr><th>Nombre</th><th>Identificación</th><th>Tipo</th><th>Retención</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  '<div class="card table-wrap"><table class="data"><thead><tr><th>Nombre</th><th>Identificación</th><th>Tipo</th><th>Ciudad</th><th>Retención</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 
   if(S.tercImportErr) body += '<div class="login-err" style="margin-top:10px">'+esc(S.tercImportErr)+'</div>';
   if(S.tercImportRows && S.tercImportRows.length){
@@ -1388,6 +1394,10 @@ function nuevoTerceroModal(){
     '<div class="field"><label>Nombre</label><input id="t-nombre" placeholder="Nombre completo o razón social"></div>' +
     '<div class="field-row"><div class="field"><label>Identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div>' +
     '<div class="field"><label>Tipo</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor">Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div></div>' +
+    '<div class="field"><label>Dirección</label><input id="t-direccion" placeholder="Cra / Calle..."></div>' +
+    '<div class="field-row3"><div class="field"><label>Ciudad</label><input id="t-ciudad"></div>' +
+    '<div class="field"><label>Departamento</label><input id="t-departamento"></div>' +
+    '<div class="field"><label>País</label><input id="t-pais" value="Colombia"></div></div>' +
     '<div class="field" style="background:var(--surface-2);border-radius:8px;padding:10px;margin-top:2px">' +
       '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"> No se le practica retención (responsabilidad O-15 Autorretenedor u O-47 Régimen Simple)</label>' +
       '<label>Concepto de retención (si no es autorretenedor)</label>' +
@@ -1469,8 +1479,12 @@ window.app = {
     var t=document.getElementById("t-tipo").value;
     var auto=document.getElementById("t-autorretenedor").checked;
     var conc=document.getElementById("t-concepto").value;
+    var dir=document.getElementById("t-direccion").value.trim();
+    var ciu=document.getElementById("t-ciudad").value.trim();
+    var dep=document.getElementById("t-departamento").value.trim();
+    var pai=document.getElementById("t-pais").value.trim();
     if(!n){ alert("Escribe el nombre del tercero."); return; }
-    guardarTercero(n,i,t,auto,conc);
+    guardarTercero(n,i,t,auto,conc,dir,ciu,dep,pai);
   },
   eliminarTercero: eliminarTercero,
   descargarPlantillaTerceros: descargarPlantillaTerceros,
