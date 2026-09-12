@@ -393,28 +393,40 @@ async function selectEmpresa(id){
   var chD = sb.channel("periodos-"+id).on("postgres_changes",{event:"*",schema:"public",table:"periodos",filter:"empresa_id=eq."+id},debounce(function(){ loadPeriodos(id).then(render); })).subscribe();
   S.empresaChannels = [chC,chT,chP,chD];
 }
+async function loadAllRows(table, id){
+  var all=[], from=0, pageSize=1000;
+  while(true){
+    var res = await sb.from(table).select("*").eq("empresa_id",id).range(from, from+pageSize-1);
+    if(res.error){ console.error(res.error); break; }
+    var chunk = res.data||[];
+    all = all.concat(chunk);
+    if(chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
 async function loadCuentas(id){
-  var res = await sb.from("cuentas").select("*").eq("empresa_id",id).order("codigo");
-  if(res.error){ console.error(res.error); return; }
-  S.cuentas = (res.data||[]).map(function(r){ r._id=r.codigo; return r; });
+  var data = await loadAllRows("cuentas", id);
+  var list = data.map(function(r){ r._id=r.codigo; return r; });
+  list.sort(function(a,b){ return a.codigo.localeCompare(b.codigo); });
+  S.cuentas = list;
 }
 async function loadTerceros(id){
-  var res = await sb.from("terceros").select("*").eq("empresa_id",id).order("nombre");
-  if(res.error){ console.error(res.error); return; }
-  S.terceros = (res.data||[]).map(function(r){ r._id=r.id; return r; });
+  var data = await loadAllRows("terceros", id);
+  var list = data.map(function(r){ r._id=r.id; return r; });
+  list.sort(function(a,b){ return (a.nombre||"").localeCompare(b.nombre||""); });
+  S.terceros = list;
 }
 async function loadComprobantes(id){
-  var res = await sb.from("comprobantes").select("*").eq("empresa_id",id);
-  if(res.error){ console.error(res.error); return; }
-  var list = (res.data||[]).map(function(r){ r._id=r.numero; return r; });
+  var data = await loadAllRows("comprobantes", id);
+  var list = data.map(function(r){ r._id=r.numero; return r; });
   list.sort(function(a,b){ if(a.fecha!==b.fecha) return a.fecha<b.fecha?-1:1; return (a._id||"").localeCompare(b._id||""); });
   S.comprobantes = list;
   if(!S.periodo){ var ps=distinctPeriodos(); S.periodo = ps.length?ps[ps.length-1]:todayPeriodo(); }
 }
 async function loadPeriodos(id){
-  var res = await sb.from("periodos").select("*").eq("empresa_id",id);
-  if(res.error){ console.error(res.error); return; }
-  var map={}; (res.data||[]).forEach(function(r){ map[r.periodo]=r; });
+  var data = await loadAllRows("periodos", id);
+  var map={}; data.forEach(function(r){ map[r.periodo]=r; });
   S.periodosDocs = map;
 }
 
