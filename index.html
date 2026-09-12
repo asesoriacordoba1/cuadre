@@ -302,7 +302,8 @@ var S = {
   config:null,
   tercImportRows:null,
   tercImportFileName:"",
-  tercImportErr:""
+  tercImportErr:"",
+  tercImportBusy:false
 };
 
 function fmtCOP(n){
@@ -680,11 +681,24 @@ async function confirmTercImport(){
       tipo_documento:r.tipo_documento, es_juridica:r.es_juridica, primer_apellido:r.primer_apellido, segundo_apellido:r.segundo_apellido,
       primer_nombre:r.primer_nombre, otros_nombres:r.otros_nombres, razon_social:r.razon_social};
   });
-  var res = await sb.from("terceros").insert(toInsert);
-  if(res.error){ alert("Error al importar: "+res.error.message); return; }
+  S.tercImportBusy=true; render();
+  var CHUNK=500, done=0;
+  for(var i=0;i<toInsert.length;i+=CHUNK){
+    var batch = toInsert.slice(i,i+CHUNK);
+    var res = await sb.from("terceros").insert(batch);
+    if(res.error){
+      S.tercImportBusy=false; render();
+      alert("Se importaron "+done+" de "+toInsert.length+" antes de un error: "+res.error.message);
+      return;
+    }
+    batch.forEach(function(r){ S.terceros.push(Object.assign({_id:r.identificacion||("tmp-"+Math.random())},r)); });
+    done += batch.length;
+    render();
+  }
+  S.tercImportBusy=false;
   S.tercImportRows=null; S.tercImportFileName="";
   render();
-  alert("Se importaron "+toInsert.length+" terceros.");
+  alert("Se importaron "+done+" terceros.");
 }
 
 /* ---------- cuentas ---------- */
@@ -1200,7 +1214,7 @@ function tercerosHTML(e){
     }).join("");
     body += '<div class="card card-pad" style="margin-top:16px">' +
       '<div class="toolbar"><div class="small">'+incl+' de '+S.tercImportRows.length+' terceros seleccionados de "'+esc(S.tercImportFileName)+'"</div>' +
-      '<button class="btn btn-sm" onclick="app.confirmTercImport()" '+(incl?"":"disabled")+'>Importar seleccionados</button></div>' +
+      '<button class="btn btn-sm" onclick="app.confirmTercImport()" '+(incl&&!S.tercImportBusy?"":"disabled")+'>'+(S.tercImportBusy?"Guardando…":"Importar seleccionados")+'</button></div>' +
       '<div class="table-wrap"><table class="data"><thead><tr><th></th><th>Nombre</th><th>Identificación</th><th>Tipo</th><th>Retención</th><th></th></tr></thead><tbody>'+rows3+'</tbody></table></div>' +
     '</div>';
   }
