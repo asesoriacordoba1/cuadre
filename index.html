@@ -998,7 +998,7 @@ function handleImportFile(file){
         if(d._error==="fecha"){ skippedFecha++; if(sampleFecha==null) sampleFecha=d.raw; return; }
         d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
         if(d.cufe) seenInFile[d.cufe]=true;
-        d.include = !d.dup && !d.esPersonal;
+        d.include = !d.dup;
         drafts.push(d);
       });
       S.importRows = drafts;
@@ -1562,7 +1562,7 @@ function periodosHTML(e){
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
-    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor no esté registrado como <a class="link" onclick="app.setTab(\'terceros\')">proveedor en Terceros</a> se marcan como <b>Personal</b> y no se seleccionan — regístralos ahí antes de importar si son gastos reales del negocio.</p>' +
+    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor no esté registrado como <a class="link" onclick="app.setTab(\'terceros\')">proveedor en Terceros</a> se marcan como <b>Personal</b> y se importan igual en la cuenta genérica (5195) para que las revises después en Comprobantes — reclasifícalas o elimínalas ahí si no son del negocio.</p>' +
     '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
