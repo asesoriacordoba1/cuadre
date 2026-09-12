@@ -936,6 +936,16 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
     }
   }
+
+  var esContado = String(row["Forma de Pago"]||"").trim()==="1";
+  if(esContado){
+    lineas = lineas.map(function(l){
+      if(l.cuenta.slice(0,4)==="1305" || l.cuenta.slice(0,4)==="2205"){
+        return {cuenta:"110505", tercero:"", detalle:l.detalle+" (contado)", debito:l.debito, credito:l.credito};
+      }
+      return l;
+    });
+  }
   if(esNC){ lineas = lineas.map(function(l){ return {cuenta:l.cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito}; }); }
 
   var esPersonal = false;
