@@ -296,7 +296,9 @@ var S = {
   importFileName:"",
   importBusy:false,
   importErr:"",
-  importProgress:null
+  importProgress:null,
+  cleanupGroups:null,
+  cleanupBusy:false
 };
 
 function fmtCOP(n){
@@ -742,6 +744,57 @@ async function confirmImport(){
   alert("Se importaron "+n+" comprobantes. Revísalos en la pestaña Comprobantes (las compras traen una cuenta de gasto genérica que puedes reclasificar).");
 }
 
+/* ---------- limpieza de compras ya importadas ---------- */
+function extractTercFromDescripcion(desc){
+  var s = String(desc||"");
+  s = s.replace(/^(Compra|Venta|Nota Crédito) - /, "");
+  s = s.replace(/\s*\([^)]*\)\s*$/, "");
+  s = s.replace(/\s*\[personal\]\s*$/, "");
+  return s.trim();
+}
+function analizarCompras(){
+  var map = {};
+  S.comprobantes.forEach(function(c){
+    if(c.tipo!=="FC") return;
+    var nombre = extractTercFromDescripcion(c.descripcion) || "(sin nombre)";
+    if(!map[nombre]) map[nombre] = {nombre:nombre, numeros:[], total:0, checked:false};
+    map[nombre].numeros.push(c._id);
+    map[nombre].total += c.total_debito||0;
+  });
+  var groups = Object.keys(map).map(function(k){return map[k];});
+  groups.sort(function(a,b){return b.total-a.total;});
+  S.cleanupGroups = groups;
+  render();
+}
+async function eliminarGruposSeleccionados(){
+  var sel = (S.cleanupGroups||[]).filter(function(g){return g.checked;});
+  if(!sel.length) return;
+  var totalNum = sel.reduce(function(a,g){return a+g.numeros.length;},0);
+  var totalVal = sel.reduce(function(a,g){return a+g.total;},0);
+  if(!confirm("¿Eliminar "+totalNum+" comprobantes ("+fmtCOP(totalVal)+") de "+sel.length+" proveedor(es)? Esta acción no se puede deshacer.")) return;
+  S.cleanupBusy=true; render();
+  var allNumeros = [];
+  sel.forEach(function(g){ g.numeros.forEach(function(n){
+    var c = S.comprobantes.find(function(x){return x._id===n;});
+    if(c && !periodoCerrado(c.periodo)) allNumeros.push(n);
+  }); });
+  var CHUNK=200;
+  for(var i=0;i<allNumeros.length;i+=CHUNK){
+    var batch = allNumeros.slice(i,i+CHUNK);
+    var res = await sb.from("comprobantes").delete().eq("empresa_id",S.empresaId).in("numero",batch);
+    if(res.error){
+      S.cleanupBusy=false; render();
+      alert("Error eliminando: "+res.error.message);
+      return;
+    }
+    S.comprobantes = S.comprobantes.filter(function(c){return batch.indexOf(c._id)<0;});
+    render();
+  }
+  S.cleanupBusy=false; S.cleanupGroups=null;
+  render();
+  alert("Se eliminaron "+allNumeros.length+" comprobantes.");
+}
+
 /* ---------- periodos ---------- */
 async function cerrarPeriodoDb(p, td, tc){
   await sb.from("periodos").upsert({empresa_id:S.empresaId, periodo:p, estado:"cerrado", fecha_cierre:todayISO(), total_debito:td, total_credito:tc},{onConflict:"empresa_id,periodo"});
@@ -1147,6 +1200,33 @@ function importarHTML(e){
       '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th class="num">Total</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
       '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar.</p>';
   }
+
+  body += '<div class="card card-pad" style="margin-top:18px">' +
+    '<div class="section-title">2. Limpiar compras ya importadas</div>' +
+    '<p class="small" style="margin-bottom:12px">Agrupa las compras que ya están guardadas por proveedor, para que revises cuáles son gastos personales y las elimines en bloque.</p>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.analizarCompras()">Analizar compras guardadas</button>';
+  if(S.cleanupGroups){
+    if(!S.cleanupGroups.length){
+      body += '<p class="small" style="margin-top:10px">No hay comprobantes de compra guardados todavía.</p>';
+    } else {
+      var proveedoresNombres = S.terceros.filter(function(t){return t.tipo==="proveedor";}).map(function(t){return t.nombre.toLowerCase();});
+      var selCount = S.cleanupGroups.filter(function(g){return g.checked;}).length;
+      var rows2 = S.cleanupGroups.map(function(g,i){
+        var esConocido = proveedoresNombres.indexOf(g.nombre.toLowerCase())>=0;
+        return '<tr>' +
+          '<td><input type="checkbox" '+(g.checked?"checked":"")+' onchange="app.toggleCleanupGroup('+i+',this.checked)"></td>' +
+          '<td>'+esc(g.nombre)+(esConocido?' <span class="chip chip-good" style="margin-left:6px"><span class="chip-dot"></span>Proveedor registrado</span>':'')+'</td>' +
+          '<td class="num">'+g.numeros.length+'</td>' +
+          '<td class="num">'+fmtCOP(g.total)+'</td>' +
+        '</tr>';
+      }).join("");
+      body += '<div class="toolbar" style="margin-top:14px"><div class="small">'+selCount+' de '+S.cleanupGroups.length+' proveedor(es) seleccionados para eliminar</div>' +
+        '<button class="btn btn-outline btn-sm" style="border-color:var(--bad);color:var(--bad)" onclick="app.eliminarGruposSeleccionados()" '+(selCount?"":"disabled")+'>Eliminar seleccionados</button></div>' +
+        '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Proveedor (según descripción)</th><th class="num">Comprobantes</th><th class="num">Total</th></tr></thead><tbody>'+rows2+'</tbody></table></div>' +
+        '<p class="small" style="margin-top:10px">Marca los proveedores que NO sean del negocio y elimínalos. Los marcados "Proveedor registrado" probablemente sí son reales — revísalos con cuidado antes de tildarlos.</p>';
+    }
+  }
+  body += '</div>';
   return body;
 }
 
@@ -1316,7 +1396,11 @@ window.app = {
 
   onImportFile: function(file){ if(!file) return; handleImportFile(file); },
   toggleImportRow: function(i,val){ S.importRows[i].include = val; render(); },
-  confirmImport: confirmImport
+  confirmImport: confirmImport,
+
+  analizarCompras: analizarCompras,
+  toggleCleanupGroup: function(i,val){ S.cleanupGroups[i].checked = val; render(); },
+  eliminarGruposSeleccionados: eliminarGruposSeleccionados
 };
 
 boot();
