@@ -293,7 +293,7 @@ var S = {
   comprobantes:[],
   periodosDocs:{},
   tab:"dashboard",
-  libroSub:"diario",
+  libroSub:"consolidado",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -1440,15 +1440,61 @@ function comprobantesHTML(e){
 
 function librosHTML(e){
   var per = S.periodo || todayPeriodo();
-  var subtabs = [["diario","Libro diario"],["mayor","Libro mayor"],["balance","Balance de prueba"],["bg","Balance general"],["er","Estado de resultados"]];
+  var subtabs = [["consolidado","Comprobante del mes"],["diario","Libro diario"],["mayor","Libro mayor"],["balance","Balance de prueba"],["bg","Balance general"],["er","Estado de resultados"]];
   var tabsHTML = '<div class="tabs-sub">'+subtabs.map(function(t){return '<button class="'+(S.libroSub===t[0]?"active":"")+'" onclick="app.setLibroSub(\''+t[0]+'\')">'+t[1]+'</button>';}).join("")+'</div>';
   var content="";
-  if(S.libroSub==="diario") content=libroDiarioHTML(per);
+  if(S.libroSub==="consolidado") content=comprobanteMensualHTML(per);
+  else if(S.libroSub==="diario") content=libroDiarioHTML(per);
   else if(S.libroSub==="mayor") content=libroMayorHTML(per);
   else if(S.libroSub==="balance") content=balancePruebaHTML(per);
   else if(S.libroSub==="bg") content=balanceGeneralHTML(per);
   else if(S.libroSub==="er") content=estadoResultadosHTML(per);
   return topbarHTML() + '<div class="toolbar">'+tabsHTML+'</div>' + content;
+}
+
+function comprobanteMensualHTML(per){
+  var list = S.comprobantes.filter(function(c){return c.periodo===per;});
+  if(!list.length) return '<div class="card card-pad"><p class="small">Sin comprobantes en '+periodoLabel(per)+'.</p></div>';
+  var bloques={};
+  list.forEach(function(c){
+    var key = c.tipo;
+    if(!bloques[key]) bloques[key]={};
+    (c.lineas||[]).forEach(function(l){
+      if(!bloques[key][l.cuenta]) bloques[key][l.cuenta]={d:0,c:0};
+      bloques[key][l.cuenta].d += Number(l.debito)||0;
+      bloques[key][l.cuenta].c += Number(l.credito)||0;
+    });
+  });
+  var orden = ["FV","FC","RC","CE","NC","NM"];
+  var claves = Object.keys(bloques).sort(function(a,b){
+    var ia=orden.indexOf(a), ib=orden.indexOf(b);
+    if(ia<0) ia=99; if(ib<0) ib=99;
+    return ia-ib;
+  });
+  var totD=0, totC=0;
+  var html = '<div class="card card-pad"><div class="section-title">Comprobante consolidado — '+periodoLabel(per)+'</div>';
+  claves.forEach(function(k){
+    var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k;
+    var codigos = Object.keys(bloques[k]).sort();
+    var subD=0, subC=0;
+    var filas = codigos.map(function(cod){
+      var s = bloques[k][cod];
+      subD+=s.d; subC+=s.c;
+      var ac = cuentaByCodigo(cod);
+      return '<tr><td class="mono acct-code">'+cod+'</td><td>'+esc(ac?ac.nombre:"")+'</td><td class="num">'+(s.d?fmtCOP(s.d):"")+'</td><td class="num">'+(s.c?fmtCOP(s.c):"")+'</td></tr>';
+    }).join("");
+    totD+=subD; totC+=subC;
+    html += '<div class="small" style="font-weight:600;margin:16px 0 6px">'+tipoLbl+'</div>' +
+      '<div class="table-wrap"><table class="data"><thead><tr><th>Cuenta</th><th>Nombre</th><th class="num">Débito</th><th class="num">Crédito</th></tr></thead><tbody>'+filas+
+      '<tr class="total-row"><td colspan="2">Subtotal</td><td class="num">'+fmtCOP(subD)+'</td><td class="num">'+fmtCOP(subC)+'</td></tr></tbody></table></div>';
+  });
+  var cuadra = Math.abs(totD-totC)<1;
+  html += '<div class="kpi-grid" style="margin-top:18px">' +
+    '<div class="card kpi"><div class="lbl">Total débito</div><div class="val">'+fmtCOP(totD)+'</div></div>' +
+    '<div class="card kpi"><div class="lbl">Total crédito</div><div class="val">'+fmtCOP(totC)+'</div></div>' +
+    '<div class="card kpi"><div class="lbl">Cuadre</div><div class="val">'+(cuadra?'<span class="chip chip-good"><span class="chip-dot"></span>Cuadra</span>':'<span class="chip chip-bad"><span class="chip-dot"></span>No cuadra</span>')+'</div></div>' +
+  '</div></div>';
+  return html;
 }
 
 function libroDiarioHTML(per){
