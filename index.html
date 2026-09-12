@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cuadre</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light}
+:root{
+  --bg:#F6F4EE;
+  --surface:#FFFFFF;
+  --surface-2:#EFEBDE;
+  --ink:#1E2A22;
+  --ink-soft:#5B6A5F;
+  --ink-faint:#8B9A8E;
+  --border:#DED6C2;
+  --border-soft:#EAE4D3;
+  --accent:#1B6B57;
+  --accent-ink:#FFFFFF;
+  --accent-soft:#E3F0EA;
+  --good:#1C7A4C;
+  --good-soft:#E3F3E8;
+  --warn:#A8650B;
+  --warn-soft:#FBEEDD;
+  --bad:#AE3B2E;
+  --bad-soft:#FAE7E3;
+  --debe:#1B6B57;
+  --haber:#8A5A1E;
+  --font-ui:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',monospace;
+  --shadow:0 1px 2px rgba(30,42,34,.06),0 4px 12px rgba(30,42,34,.05);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui)}
+h1,h2,h3,h4{font-family:var(--font-ui);font-weight:600;margin:0}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%}
+button{font-family:var(--font-ui);cursor:pointer}
+input,select,textarea{font-family:var(--font-ui)}
+img{max-width:100%}
+::-webkit-scrollbar{height:8px;width:8px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+
+.app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+@media (max-width:820px){.app{grid-template-columns:1fr}.sidebar{display:none}}
+
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 14px;gap:18px}
+.brand{display:flex;align-items:baseline;gap:8px;padding:0 6px}
+.brand-mark{width:9px;height:9px;border-radius:2px;background:var(--accent);flex:none;transform:rotate(45deg)}
+.brand-name{font-size:18px;font-weight:700;letter-spacing:.01em}
+
+.empresa-box{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:10px;padding:10px}
+.empresa-box label{display:block;font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.empresa-box select{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:7px;padding:7px 8px;font-size:13px}
+.empresa-meta{font-size:11.5px;color:var(--ink-soft);margin-top:8px;line-height:1.5}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:100px;letter-spacing:.02em}
+.pill-niif{background:var(--accent-soft);color:var(--accent)}
+
+.btn-ghost-sm{width:100%;margin-top:8px;background:transparent;border:1px dashed var(--border);color:var(--ink-soft);border-radius:7px;padding:6px;font-size:12px;font-weight:500}
+.btn-ghost-sm:hover{border-color:var(--accent);color:var(--accent)}
+
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font-size:13.5px;font-weight:500;color:var(--ink-soft);border:none;background:transparent;text-align:left;width:100%}
+.nav-item:hover{background:var(--surface-2);color:var(--ink)}
+.nav-item.active{background:var(--accent-soft);color:var(--accent)}
+.nav-ico{width:16px;text-align:center;font-size:13px}
+
+.sidebar-foot{margin-top:auto;font-size:11px;color:var(--ink-faint);padding:0 6px;line-height:1.6}
+.sidebar-foot .who{color:var(--ink-soft);font-weight:600}
+.sidebar-foot a{color:var(--accent);text-decoration:none;font-weight:600;cursor:pointer}
+
+.main{padding:26px 34px 60px;max-width:1180px}
+.topbar{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:22px}
+.topbar h1{font-size:22px}
+.topbar .sub{font-size:13px;color:var(--ink-soft);margin-top:3px}
+.period-switch{display:flex;align-items:center;gap:8px}
+.period-switch select{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:13px}
+
+.card{background:var(--surface);border:1px solid var(--border-soft);border-radius:12px;box-shadow:var(--shadow)}
+.card-pad{padding:18px 20px}
+.section-title{font-size:11.5px;font-weight:600;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:22px}
+.kpi{padding:16px 18px}
+.kpi .lbl{font-size:11.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em}
+.kpi .val{font-family:var(--font-mono);font-size:22px;font-weight:600;margin-top:6px}
+.kpi .foot{font-size:11.5px;margin-top:5px;color:var(--ink-soft)}
+
+.grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+@media (max-width:940px){.grid-2{grid-template-columns:1fr}}
+
+table.data th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+table.data td{padding:9px 10px;border-bottom:1px solid var(--border-soft);font-size:13px;vertical-align:top}
+table.data tr:last-child td{border-bottom:none}
+table.data td.num,table.data th.num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+table.data tbody tr:hover{background:var(--surface-2)}
+.table-wrap{overflow-x:auto;border-radius:12px}
+.hdr-row td{background:var(--surface-2);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft)}
+.total-row td{border-top:2px solid var(--border);font-weight:600}
+
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:100px}
+.chip-good{background:var(--good-soft);color:var(--good)}
+.chip-warn{background:var(--warn-soft);color:var(--warn)}
+.chip-bad{background:var(--bad-soft);color:var(--bad)}
+.chip-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+
+.btn{display:inline-flex;align-items:center;gap:6px;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;background:var(--accent);color:var(--accent-ink)}
+.btn:hover{filter:brightness(1.06)}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--ink)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn-sm{padding:6px 11px;font-size:12px;border-radius:7px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn-full{width:100%;justify-content:center}
+
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.tabs-sub{display:flex;gap:4px;background:var(--surface-2);padding:3px;border-radius:9px}
+.tabs-sub button{border:none;background:transparent;padding:6px 12px;font-size:12.5px;font-weight:600;border-radius:7px;color:var(--ink-soft)}
+.tabs-sub button.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow)}
+
+.empty{padding:40px 20px;text-align:center;color:var(--ink-soft)}
+.empty h3{margin-bottom:6px;color:var(--ink)}
+.empty p{font-size:13px;margin-bottom:16px}
+
+.modal-back{position:fixed;inset:0;background:rgba(15,20,17,.45);display:flex;align-items:flex-start;justify-content:center;padding:5vh 16px;z-index:50;overflow-y:auto}
+.modal{background:var(--surface);border-radius:14px;max-width:620px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);border:1px solid var(--border-soft)}
+.modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border-soft)}
+.modal-head h3{font-size:16px}
+.modal-x{background:transparent;border:none;font-size:16px;color:var(--ink-faint);padding:4px 8px}
+.modal-body{padding:18px 20px}
+.modal-foot{padding:14px 20px;border-top:1px solid var(--border-soft);display:flex;justify-content:flex-end;gap:8px}
+
+.field{margin-bottom:13px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:5px}
+.field input,.field select,.field textarea{width:100%;border:1px solid var(--border);background:var(--bg);color:var(--ink);border-radius:8px;padding:9px 10px;font-size:13.5px}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.radio-group{display:flex;gap:8px}
+.radio-opt{flex:1;border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center;font-size:12.5px;font-weight:600;color:var(--ink-soft)}
+.radio-opt.sel{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+
+.lines-table th,.lines-table td{padding:6px 6px}
+.lines-table input,.lines-table select{padding:6px 7px;font-size:12.5px;border-radius:6px}
+.lines-table td.num input{text-align:right;font-family:var(--font-mono)}
+.line-del{background:transparent;border:none;color:var(--ink-faint);font-size:15px;padding:2px 6px}
+.line-del:hover{color:var(--bad)}
+.totals-bar{display:flex;justify-content:flex-end;gap:22px;padding:12px 6px 4px;font-size:13px}
+.totals-bar .t-lbl{color:var(--ink-faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;display:block}
+.totals-bar .t-val{font-family:var(--font-mono);font-weight:600;font-size:15px}
+.diff-off .t-val{color:var(--bad)}
+.diff-ok .t-val{color:var(--good)}
+
+.banner{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-soft);border:1px solid var(--border-soft);color:var(--accent);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:18px}
+.banner button{background:transparent;border:1px solid currentColor;border-radius:7px;padding:4px 10px;font-size:11.5px;font-weight:600;color:inherit}
+
+.loading{display:flex;align-items:center;gap:8px;color:var(--ink-faint);font-size:13px;padding:40px 0;justify-content:center}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.acct-code{font-family:var(--font-mono);color:var(--ink-soft);font-size:12px}
+.acct-head td{background:var(--surface-2);font-weight:700;font-size:11.5px;letter-spacing:.03em}
+.indent-1{padding-left:18px!important}
+.indent-2{padding-left:32px!important}
+a.link{color:var(--accent);text-decoration:none;font-weight:600;cursor:pointer}
+a.link:hover{text-decoration:underline}
+.small{font-size:11.5px;color:var(--ink-faint)}
+
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.login-card{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--border-soft);border-radius:14px;box-shadow:var(--shadow);padding:28px 26px}
+.login-card .brand{padding:0;margin-bottom:4px}
+.login-card p.sub{font-size:12.5px;color:var(--ink-soft);margin:4px 0 20px}
+.login-err{background:var(--bad-soft);color:var(--bad);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div id="root" class="app">
+  <div class="loading" style="grid-column:1/-1"><div class="spin"></div>Cargando Cuadre…</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function(){
+"use strict";
+
+var SUPABASE_URL = "https://pwneuqkqsjeziyzflytx.supabase.co";
+var SUPABASE_ANON_KEY = "sb_publishable_tcciM3eglJrLVP2djnnU-g_HUsaBKPZ";
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ---------- PUC template (Decreto 2650) ---------- */
+var PUC = [
+ ["1","ACTIVO","activo",0],
+ ["11","DISPONIBLE","activo",0],
+ ["1105","Caja","activo",1],
+ ["110505","Caja general","activo",2],
+ ["1110","Bancos","activo",1],
+ ["111005","Bancos - cuenta corriente","activo",2],
+ ["1120","Cuentas de ahorro","activo",1],
+ ["13","DEUDORES","activo",0],
+ ["1305","Clientes nacionales","activo",1],
+ ["1355","Anticipo de impuestos y contribuciones","activo",1],
+ ["135515","Retención en la fuente a favor","activo",2],
+ ["1365","Cuentas por cobrar a trabajadores","activo",1],
+ ["14","INVENTARIOS","activo",0],
+ ["1435","Mercancías no fabricadas por la empresa","activo",1],
+ ["15","PROPIEDADES, PLANTA Y EQUIPO","activo",0],
+ ["1524","Equipo de oficina","activo",1],
+ ["1528","Equipo de cómputo y comunicación","activo",1],
+ ["1592","Depreciación acumulada","activo",1,true],
+ ["2","PASIVO","pasivo",0],
+ ["22","PROVEEDORES","pasivo",0],
+ ["2205","Proveedores nacionales","pasivo",1],
+ ["23","CUENTAS POR PAGAR","pasivo",0],
+ ["2335","Costos y gastos por pagar","pasivo",1],
+ ["2365","Retención en la fuente por pagar","pasivo",1],
+ ["2367","Impuesto a las ventas retenido - Reteiva","pasivo",1],
+ ["24","IMPUESTOS, GRAVÁMENES Y TASAS","pasivo",0],
+ ["2404","De renta y complementarios","pasivo",1],
+ ["2408","Impuesto sobre las ventas por pagar - IVA","pasivo",1],
+ ["25","OBLIGACIONES LABORALES","pasivo",0],
+ ["2505","Salarios por pagar","pasivo",1],
+ ["2510","Cesantías consolidadas","pasivo",1],
+ ["2515","Intereses sobre cesantías","pasivo",1],
+ ["2520","Prima de servicios","pasivo",1],
+ ["2525","Vacaciones consolidadas","pasivo",1],
+ ["26","OTROS PASIVOS","pasivo",0],
+ ["2610","Anticipos y avances recibidos","pasivo",1],
+ ["3","PATRIMONIO","patrimonio",0],
+ ["31","CAPITAL SOCIAL","patrimonio",0],
+ ["3115","Aportes sociales","patrimonio",1],
+ ["36","RESULTADOS DEL EJERCICIO","patrimonio",0],
+ ["3605","Utilidad del ejercicio","patrimonio",1],
+ ["3610","Pérdida del ejercicio","patrimonio",1],
+ ["4","INGRESOS","ingreso",0],
+ ["41","OPERACIONALES","ingreso",0],
+ ["4135","Comercio al por mayor y al por menor","ingreso",1],
+ ["4175","Devoluciones en ventas","ingreso",1,true],
+ ["42","NO OPERACIONALES","ingreso",0],
+ ["4210","Financieros","ingreso",1],
+ ["4295","Diversos","ingreso",1],
+ ["5","GASTOS","gasto",0],
+ ["51","OPERACIONALES DE ADMINISTRACIÓN","gasto",0],
+ ["5105","Gastos de personal","gasto",1],
+ ["5110","Honorarios","gasto",1],
+ ["5115","Impuestos","gasto",1],
+ ["5120","Arrendamientos","gasto",1],
+ ["5135","Servicios","gasto",1],
+ ["5140","Gastos legales","gasto",1],
+ ["5145","Mantenimiento y reparaciones","gasto",1],
+ ["5195","Diversos","gasto",1],
+ ["52","OPERACIONALES DE VENTAS","gasto",0],
+ ["5205","Gastos de personal","gasto",1],
+ ["5295","Diversos","gasto",1],
+ ["53","NO OPERACIONALES","gasto",0],
+ ["5305","Financieros","gasto",1],
+ ["6","COSTO DE VENTAS","costo",0],
+ ["61","COSTO DE VENTAS Y DE PRESTACIÓN DE SERVICIOS","costo",0],
+ ["6135","Comercio al por mayor y al por menor","costo",1]
+];
+var DEB_TIPOS={activo:1,gasto:1,costo:1,pasivo:0,patrimonio:0,ingreso:0};
+function naturaleza(tipo,contra){var d=DEB_TIPOS[tipo]?1:0; if(contra) d=1-d; return d?"debito":"credito";}
+function esPostable(codigo){return codigo.length>=4;}
+
+var COMPROB_TIPOS=[
+  {k:"NC",label:"Nota Contable"},
+  {k:"FV",label:"Factura de Venta"},
+  {k:"FC",label:"Factura de Compra"},
+  {k:"RC",label:"Recibo de Caja"},
+  {k:"CE",label:"Comprobante de Egreso"},
+  {k:"NM",label:"Nómina"}
+];
+var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+/* ---------- state ---------- */
+var S = {
+  session:null,
+  authChecked:false,
+  loginErr:"",
+  empresas:[],
+  empresaId:null,
+  cuentas:[],
+  terceros:[],
+  comprobantes:[],
+  periodosDocs:{},
+  tab:"dashboard",
+  libroSub:"diario",
+  periodo:null,
+  channels:[],
+  empresaChannels:[]
+};
+
+function fmtCOP(n){
+  n = Math.round(n||0);
+  var neg = n<0; n=Math.abs(n);
+  var s = n.toLocaleString('es-CO');
+  return (neg?"-$ ":"$ ")+s;
+}
+function fmtDate(iso){
+  if(!iso) return "";
+  var p=iso.split("-"); return p[2]+"/"+p[1]+"/"+p[0];
+}
+function periodoLabel(p){
+  if(!p) return "";
+  var parts=p.split("-"); return MESES[parseInt(parts[1],10)-1]+" "+parts[0];
+}
+function todayISO(){var d=new Date();return d.toISOString().slice(0,10);}
+function todayPeriodo(){return todayISO().slice(0,7);}
+function prevPeriodo(p){var y=parseInt(p.slice(0,4),10),m=parseInt(p.slice(5,7),10); m--; if(m<1){m=12;y--;} return y+"-"+String(m).padStart(2,"0");}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+
+/* ---------- boot / auth ---------- */
+function boot(){
+  render();
+  sb.auth.getSession().then(function(res){
+    S.session = res.data.session; S.authChecked = true;
+    render();
+    if(S.session) afterLogin();
+  });
+  sb.auth.onAuthStateChange(function(event, session){
+    var had = !!S.session;
+    S.session = session;
+    if(session && !had){ render(); afterLogin(); }
+    else if(!session && had){ teardownEmpresa(); S.empresas=[]; S.empresaId=null; clearMainChannels(); render(); }
+  });
+}
+function afterLogin(){
+  loadEmpresas();
+  subscribeEmpresasRealtime();
+}
+function clearMainChannels(){
+  S.channels.forEach(function(ch){ sb.removeChannel(ch); });
+  S.channels=[];
+}
+async function doLogin(email,pass){
+  S.loginErr="";
+  var res = await sb.auth.signInWithPassword({email:email,password:pass});
+  if(res.error){ S.loginErr = res.error.message==="Invalid login credentials" ? "Correo o contraseña incorrectos." : res.error.message; render(); return; }
+}
+function doLogout(){
+  sb.auth.signOut();
+}
+
+/* ---------- empresas ---------- */
+async function loadEmpresas(){
+  var res = await sb.from("empresas").select("*").order("nombre");
+  if(res.error){ console.error(res.error); return; }
+  S.empresas = res.data || [];
+  if(!S.empresaId && S.empresas.length){ selectEmpresa(S.empresas[0].id); }
+  else if(S.empresaId && !S.empresas.some(function(e){return e.id===S.empresaId;})){
+    S.empresaId = S.empresas.length?S.empresas[0].id:null;
+    if(S.empresaId) selectEmpresa(S.empresaId); else { teardownEmpresa(); render(); }
+  } else render();
+}
+function subscribeEmpresasRealtime(){
+  var ch = sb.channel("empresas-rt").on("postgres_changes",{event:"*",schema:"public",table:"empresas"},function(){ loadEmpresas(); }).subscribe();
+  S.channels.push(ch);
+}
+
+function teardownEmpresa(){
+  S.empresaChannels.forEach(function(ch){ sb.removeChannel(ch); });
+  S.empresaChannels=[];
+  S.cuentas=[]; S.terceros=[]; S.comprobantes=[]; S.periodosDocs={};
+}
+
+async function selectEmpresa(id){
+  if(S.empresaId===id && S.cuentas.length){ render(); return; }
+  S.empresaId = id;
+  teardownEmpresa();
+  render();
+  if(!id) return;
+  await Promise.all([loadCuentas(id), loadTerceros(id), loadComprobantes(id), loadPeriodos(id)]);
+  render();
+  var chC = sb.channel("cuentas-"+id).on("postgres_changes",{event:"*",schema:"public",table:"cuentas",filter:"empresa_id=eq."+id},function(){ loadCuentas(id).then(render); }).subscribe();
+  var chT = sb.channel("terceros-"+id).on("postgres_changes",{event:"*",schema:"public",table:"terceros",filter:"empresa_id=eq."+id},function(){ loadTerceros(id).then(render); }).subscribe();
+  var chP = sb.channel("comprobantes-"+id).on("postgres_changes",{event:"*",schema:"public",table:"comprobantes",filter:"empresa_id=eq."+id},function(){ loadComprobantes(id).then(render); }).subscribe();
+  var chD = sb.channel("periodos-"+id).on("postgres_changes",{event:"*",schema:"public",table:"periodos",filter:"empresa_id=eq."+id},function(){ loadPeriodos(id).then(render); }).subscribe();
+  S.empresaChannels = [chC,chT,chP,chD];
+}
+async function loadCuentas(id){
+  var res = await sb.from("cuentas").select("*").eq("empresa_id",id).order("codigo");
+  if(res.error){ console.error(res.error); return; }
+  S.cuentas = (res.data||[]).map(function(r){ r._id=r.codigo; return r; });
+}
+async function loadTerceros(id){
+  var res = await sb.from("terceros").select("*").eq("empresa_id",id).order("nombre");
+  if(res.error){ console.error(res.error); return; }
+  S.terceros = (res.data||[]).map(function(r){ r._id=r.id; return r; });
+}
+async function loadComprobantes(id){
+  var res = await sb.from("comprobantes").select("*").eq("empresa_id",id);
+  if(res.error){ console.error(res.error); return; }
+  var list = (res.data||[]).map(function(r){ r._id=r.numero; return r; });
+  list.sort(function(a,b){ if(a.fecha!==b.fecha) return a.fecha<b.fecha?-1:1; return (a._id||"").localeCompare(b._id||""); });
+  S.comprobantes = list;
+  if(!S.periodo){ var ps=distinctPeriodos(); S.periodo = ps.length?ps[ps.length-1]:todayPeriodo(); }
+}
+async function loadPeriodos(id){
+  var res = await sb.from("periodos").select("*").eq("empresa_id",id);
+  if(res.error){ console.error(res.error); return; }
+  var map={}; (res.data||[]).forEach(function(r){ map[r.periodo]=r; });
+  S.periodosDocs = map;
+}
+
+function distinctPeriodos(){
+  var set={};
+  S.comprobantes.forEach(function(c){ if(c.periodo) set[c.periodo]=1; });
+  set[todayPeriodo()]=1;
+  return Object.keys(set).sort();
+}
+function currentEmpresa(){ return S.empresas.find(function(e){return e.id===S.empresaId;}); }
+function cuentaByCodigo(c){ return S.cuentas.find(function(x){return x.codigo===c;}); }
+function terceroById(id){ return S.terceros.find(function(t){return t.id===id;}); }
+
+/* ---------- create empresa ---------- */
+async function crearEmpresa(nombre, nit, sector, grupo){
+  var ins = await sb.from("empresas").insert({nombre:nombre, nit:nit, sector:sector, grupo_niif:grupo, creada:todayISO(), demo:false}).select().single();
+  if(ins.error){ alert("No se pudo crear la empresa: "+ins.error.message); return; }
+  var id = ins.data.id;
+  var rows = PUC.map(function(row){ return {empresa_id:id, codigo:row[0], nombre:row[1], tipo:row[2], nivel:row[3], naturaleza:naturaleza(row[2],!!row[4]), postable:esPostable(row[0])}; });
+  await sb.from("cuentas").insert(rows);
+  closeModal();
+  selectEmpresa(id);
+}
+
+async function crearEmpresaDemo(){
+  var ins = await sb.from("empresas").insert({nombre:"Comercializadora Demo S.A.S.", nit:"900123456-7", sector:"Comercio al por menor", grupo_niif:2, creada:todayISO(), demo:true}).select().single();
+  if(ins.error){ alert("No se pudo crear la empresa demo: "+ins.error.message); return; }
+  var id = ins.data.id;
+  var cuentasRows = PUC.map(function(row){ return {empresa_id:id, codigo:row[0], nombre:row[1], tipo:row[2], nivel:row[3], naturaleza:naturaleza(row[2],!!row[4]), postable:esPostable(row[0])}; });
+  await sb.from("cuentas").insert(cuentasRows);
+
+  var terceros=[
+    {ref:"cliente-alfa", nombre:"Distribuidora Alfa S.A.S.", identificacion:"901234567-1", tipo:"cliente"},
+    {ref:"prov-beta", nombre:"Suministros Beta Ltda.", identificacion:"800987654-2", tipo:"proveedor"},
+    {ref:"empleado-1", nombre:"María Fernanda Ríos", identificacion:"1043567890", tipo:"empleado"}
+  ];
+  var tIns = await sb.from("terceros").insert(terceros.map(function(t){ return {empresa_id:id, nombre:t.nombre, identificacion:t.identificacion, tipo:t.tipo}; })).select();
+  var terceroIdByRef={};
+  if(tIns.data){ tIns.data.forEach(function(row,i){ terceroIdByRef[terceros[i].ref]=row.id; }); }
+
+  var periodo="2026-01";
+  var vouchers=[
+    {numero:"NC-2026-01-0001", tipo:"NC", fecha:"2026-01-02", descripcion:"Constitución de la empresa - aportes de socios en efectivo y bancos",
+     lineas:[
+       {cuenta:"110505", tercero:"", detalle:"Caja general", debito:3000000, credito:0},
+       {cuenta:"111005", tercero:"", detalle:"Bancos cuenta corriente", debito:22000000, credito:0},
+       {cuenta:"3115", tercero:"", detalle:"Aportes sociales", debito:0, credito:25000000}
+     ]},
+    {numero:"FV-2026-01-0001", tipo:"FV", fecha:"2026-01-08", descripcion:"Venta de mercancía a crédito - Factura FV-101",
+     lineas:[
+       {cuenta:"1305", tercero:"cliente-alfa", detalle:"Factura FV-101", debito:5950000, credito:0},
+       {cuenta:"4135", tercero:"", detalle:"Venta de mercancía", debito:0, credito:5000000},
+       {cuenta:"2408", tercero:"", detalle:"IVA generado 19%", debito:0, credito:950000}
+     ]},
+    {numero:"FC-2026-01-0001", tipo:"FC", fecha:"2026-01-10", descripcion:"Compra de mercancía a crédito - Factura FC-450",
+     lineas:[
+       {cuenta:"1435", tercero:"", detalle:"Mercancía FC-450", debito:3000000, credito:0},
+       {cuenta:"2408", tercero:"", detalle:"IVA descontable 19%", debito:570000, credito:0},
+       {cuenta:"2205", tercero:"prov-beta", detalle:"Factura FC-450", debito:0, credito:3570000}
+     ]},
+    {numero:"CE-2026-01-0001", tipo:"CE", fecha:"2026-01-15", descripcion:"Pago de nómina enero - primera quincena",
+     lineas:[
+       {cuenta:"5105", tercero:"empleado-1", detalle:"Nómina 1a quincena", debito:1200000, credito:0},
+       {cuenta:"111005", tercero:"", detalle:"Pago nómina", debito:0, credito:1200000}
+     ]},
+    {numero:"CE-2026-01-0002", tipo:"CE", fecha:"2026-01-20", descripcion:"Pago parcial a Suministros Beta",
+     lineas:[
+       {cuenta:"2205", tercero:"prov-beta", detalle:"Abono FC-450", debito:2000000, credito:0},
+       {cuenta:"111005", tercero:"", detalle:"Pago proveedor", debito:0, credito:2000000}
+     ]},
+    {numero:"RC-2026-01-0001", tipo:"RC", fecha:"2026-01-25", descripcion:"Abono de cliente Alfa a factura FV-101",
+     lineas:[
+       {cuenta:"110505", tercero:"", detalle:"Recibo de caja", debito:2950000, credito:0},
+       {cuenta:"1305", tercero:"cliente-alfa", detalle:"Abono FV-101", debito:0, credito:2950000}
+     ]},
+    {numero:"CE-2026-01-0003", tipo:"CE", fecha:"2026-01-28", descripcion:"Pago servicios públicos de la oficina",
+     lineas:[
+       {cuenta:"5135", tercero:"", detalle:"Servicios públicos", debito:380000, credito:0},
+       {cuenta:"111005", tercero:"", detalle:"Pago servicios", debito:0, credito:380000}
+     ]}
+  ];
+  var voucherRows = vouchers.map(function(v){
+    var lineas = v.lineas.map(function(l){ return {cuenta:l.cuenta, tercero: l.tercero?terceroIdByRef[l.tercero]:"", detalle:l.detalle, debito:l.debito, credito:l.credito}; });
+    var tot = totalsOf(lineas);
+    return {empresa_id:id, numero:v.numero, tipo:v.tipo, fecha:v.fecha, periodo:periodo, descripcion:v.descripcion, lineas:lineas, total_debito:tot.d, total_credito:tot.c, estado:"contabilizado"};
+  });
+  await sb.from("comprobantes").insert(voucherRows);
+  closeModal();
+  selectEmpresa(id);
+}
+
+async function eliminarEmpresaDemo(){
+  if(!confirm("¿Quitar la empresa de ejemplo? Esto no afecta tus empresas reales.")) return;
+  var e = currentEmpresa();
+  if(!e) return;
+  await sb.from("empresas").delete().eq("id",e.id);
+}
+
+/* ---------- comprobantes ---------- */
+function totalsOf(lineas){
+  var d=0,c=0;
+  lineas.forEach(function(l){ d+=Number(l.debito)||0; c+=Number(l.credito)||0; });
+  return {d:d,c:c};
+}
+function nextNumero(prefix, periodo){
+  var max=0;
+  S.comprobantes.forEach(function(c){
+    if(c.tipo===prefix && c.periodo===periodo){
+      var n=parseInt((c._id||"").split("-").pop(),10);
+      if(n>max) max=n;
+    }
+  });
+  return prefix+"-"+periodo+"-"+String(max+1).padStart(4,"0");
+}
+function periodoCerrado(p){ return S.periodosDocs[p] && S.periodosDocs[p].estado==="cerrado"; }
+
+async function guardarComprobante(data){
+  var tot=totalsOf(data.lineas);
+  if(Math.abs(tot.d-tot.c)>0.5 || tot.d===0){ alert("El comprobante debe cuadrar (débitos = créditos) antes de guardarlo."); return; }
+  if(periodoCerrado(data.periodo)){ alert("Ese periodo ya está cerrado. Reábrelo desde Periodos para poder modificarlo."); return; }
+  var numero = data._id || nextNumero(data.tipo, data.periodo);
+  var row = {
+    empresa_id:S.empresaId, numero:numero, tipo:data.tipo, fecha:data.fecha, periodo:data.periodo, descripcion:data.descripcion,
+    lineas:data.lineas, total_debito:tot.d, total_credito:tot.c, estado:"contabilizado"
+  };
+  var res = await sb.from("comprobantes").upsert(row,{onConflict:"empresa_id,numero"});
+  if(res.error){ alert("No se pudo guardar: "+res.error.message); return; }
+  closeModal();
+}
+async function eliminarComprobante(numero){
+  var c = S.comprobantes.find(function(x){return x._id===numero;});
+  if(c && periodoCerrado(c.periodo)){ alert("No puedes eliminar comprobantes de un periodo cerrado."); return; }
+  if(!confirm("¿Eliminar el comprobante "+numero+"? Esta acción no se puede deshacer.")) return;
+  await sb.from("comprobantes").delete().eq("empresa_id",S.empresaId).eq("numero",numero);
+}
+
+/* ---------- terceros ---------- */
+async function guardarTercero(nombre, ident, tipo){
+  await sb.from("terceros").insert({empresa_id:S.empresaId, nombre:nombre, identificacion:ident, tipo:tipo});
+  closeModal();
+}
+async function eliminarTercero(id){
+  if(!confirm("¿Eliminar este tercero?")) return;
+  await sb.from("terceros").delete().eq("id",id);
+}
+
+/* ---------- cuentas ---------- */
+async function guardarCuenta(codigo, nombre, tipo){
+  if(cuentaByCodigo(codigo)){ alert("Ya existe una cuenta con el código "+codigo); return; }
+  var res = await sb.from("cuentas").insert({empresa_id:S.empresaId, codigo:codigo, nombre:nombre, tipo:tipo, nivel: codigo.length>=6?2:1, naturaleza: naturaleza(tipo,false), postable: esPostable(codigo)});
+  if(res.error){ alert("No se pudo guardar: "+res.error.message); return; }
+  closeModal();
+}
+
+/* ---------- periodos ---------- */
+async function cerrarPeriodoDb(p, td, tc){
+  await sb.from("periodos").upsert({empresa_id:S.empresaId, periodo:p, estado:"cerrado", fecha_cierre:todayISO(), total_debito:td, total_credito:tc},{onConflict:"empresa_id,periodo"});
+}
+async function reabrirPeriodoDb(p){
+  await sb.from("periodos").upsert({empresa_id:S.empresaId, periodo:p, estado:"abierto"},{onConflict:"empresa_id,periodo"});
+}
+
+/* ---------- saldos engine ---------- */
+function computeSaldos(hastaPeriodo){
+  var saldos={};
+  S.cuentas.forEach(function(c){ saldos[c.codigo]={d:0,c:0}; });
+  S.comprobantes.forEach(function(cp){
+    if(!cp.periodo || cp.periodo>hastaPeriodo) return;
+    if(cp.periodo.slice(0,4)!==hastaPeriodo.slice(0,4)) return;
+    (cp.lineas||[]).forEach(function(l){
+      if(!saldos[l.cuenta]) saldos[l.cuenta]={d:0,c:0};
+      saldos[l.cuenta].d += Number(l.debito)||0;
+      saldos[l.cuenta].c += Number(l.credito)||0;
+    });
+  });
+  return saldos;
+}
+function movimientosPeriodo(periodo){
+  var mov={};
+  S.cuentas.forEach(function(c){ mov[c.codigo]={d:0,c:0}; });
+  S.comprobantes.forEach(function(cp){
+    if(cp.periodo!==periodo) return;
+    (cp.lineas||[]).forEach(function(l){
+      if(!mov[l.cuenta]) mov[l.cuenta]={d:0,c:0};
+      mov[l.cuenta].d += Number(l.debito)||0;
+      mov[l.cuenta].c += Number(l.credito)||0;
+    });
+  });
+  return mov;
+}
+function saldoNeto(codigo, sums){
+  var s=sums[codigo]||{d:0,c:0};
+  var ac=cuentaByCodigo(codigo);
+  var nat = ac?ac.naturaleza:"debito";
+  return nat==="debito" ? (s.d-s.c) : (s.c-s.d);
+}
+function utilidadAcumulada(hastaPeriodo){
+  var sums=computeSaldos(hastaPeriodo);
+  var ing=0,gas=0,cos=0;
+  S.cuentas.forEach(function(c){
+    if(!esPostable(c.codigo)) return;
+    var n=saldoNeto(c.codigo,sums);
+    if(c.tipo==="ingreso") ing+=n;
+    else if(c.tipo==="gasto") gas+=n;
+    else if(c.tipo==="costo") cos+=n;
+  });
+  return {ingresos:ing, gastos:gas, costos:cos, utilidad: ing-gas-cos};
+}
+
+/* ---------- modal ---------- */
+var modalHTML="";
+function closeModal(){ modalHTML=""; render(); }
+function openModal(html){ modalHTML=html; render(); }
+function refreshTotalsBar(){
+  var tot=totalsOf(draftLineas), diff=tot.d-tot.c;
+  var td=document.getElementById("v-totd"), tc=document.getElementById("v-totc"), df=document.getElementById("v-diff"), box=document.getElementById("v-diffbox"), btn=document.getElementById("v-savebtn");
+  if(!td) return;
+  td.textContent=fmtCOP(tot.d); tc.textContent=fmtCOP(tot.c); df.textContent=fmtCOP(diff);
+  var ok = Math.abs(diff)<0.5 && tot.d>0;
+  box.className = ok?"diff-ok":"diff-off";
+  if(btn){ if(ok) btn.removeAttribute("disabled"); else btn.setAttribute("disabled","disabled"); }
+}
+
+/* ---------- render ---------- */
+function loginScreen(){
+  return '<div class="login-wrap"><div class="login-card">' +
+    '<div class="brand"><span class="brand-mark"></span><span class="brand-name">Cuadre</span></div>' +
+    '<p class="sub">Sistema contable multiempresa</p>' +
+    (S.loginErr?'<div class="login-err">'+esc(S.loginErr)+'</div>':"") +
+    '<form id="login-form">' +
+      '<div class="field"><label>Correo</label><input type="email" id="li-email" required autocomplete="username"></div>' +
+      '<div class="field"><label>Contraseña</label><input type="password" id="li-pass" required autocomplete="current-password"></div>' +
+      '<button type="submit" class="btn btn-full">Iniciar sesión</button>' +
+    '</form>' +
+  '</div></div>';
+}
+function render(){
+  var root=document.getElementById("root");
+  if(!S.authChecked){
+    root.innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spin"></div>Cargando Cuadre…</div>';
+    return;
+  }
+  if(!S.session){
+    root.innerHTML = loginScreen();
+    var f = document.getElementById("login-form");
+    if(f) f.addEventListener("submit", function(ev){
+      ev.preventDefault();
+      doLogin(document.getElementById("li-email").value.trim(), document.getElementById("li-pass").value);
+    });
+    return;
+  }
+  root.innerHTML = sidebarHTML() + mainHTML() + (modalHTML||"");
+}
+
+function navItem(key, icon, label){
+  return '<button class="nav-item'+(S.tab===key?" active":"")+'" onclick="app.setTab(\''+key+'\')"><span class="nav-ico">'+icon+'</span>'+label+'</button>';
+}
+
+function sidebarHTML(){
+  var e = currentEmpresa();
+  var opts = S.empresas.map(function(x){ return '<option value="'+x.id+'"'+(x.id===S.empresaId?" selected":"")+'>'+esc(x.nombre)+'</option>'; }).join("");
+  var meta = e ? ('<div class="empresa-meta">NIT '+esc(e.nit||"—")+'<br>'+esc(e.sector||"")+'</div><span class="pill pill-niif">Grupo NIIF '+e.grupo_niif+'</span>') : "";
+  return '' +
+  '<div class="sidebar">' +
+    '<div class="brand"><span class="brand-mark"></span><span class="brand-name">Cuadre</span></div>' +
+    '<div class="empresa-box">' +
+      '<label>Empresa activa</label>' +
+      (S.empresas.length ? '<select onchange="app.pickEmpresa(this.value)">'+opts+'</select>' : '<div class="small">Aún no tienes empresas</div>') +
+      meta +
+      '<button class="btn-ghost-sm" onclick="app.openNuevaEmpresa()">+ Nueva empresa</button>' +
+    '</div>' +
+    '<div class="nav">' +
+      navItem("dashboard","◆","Panel") +
+      navItem("plan","▤","Plan de cuentas") +
+      navItem("terceros","◍","Terceros") +
+      navItem("comprobantes","▥","Comprobantes") +
+      navItem("libros","▦","Libros y estados") +
+      navItem("periodos","◔","Periodos") +
+    '</div>' +
+    '<div class="sidebar-foot">Sesión: <span class="who">'+esc(S.session.user.email)+'</span><br><a onclick="app.logout()">Cerrar sesión</a></div>' +
+  '</div>';
+}
+
+function mainHTML(){
+  if(!S.empresas.length){
+    return '<div class="main"><div class="empty card" style="margin-top:12vh"><h3>Crea tu primera empresa</h3><p>Cada empresa tiene su propio plan de cuentas, terceros y comprobantes.</p>' +
+      '<div class="btn-row" style="justify-content:center"><button class="btn" onclick="app.openNuevaEmpresa()">Crear empresa</button><button class="btn btn-outline" onclick="app.crearDemo()">Cargar empresa de ejemplo</button></div></div></div>';
+  }
+  var e = currentEmpresa();
+  if(!e) return '<div class="main"><div class="loading"><div class="spin"></div>Cargando empresa…</div></div>';
+
+  var body="";
+  if(S.tab==="dashboard") body=dashboardHTML(e);
+  else if(S.tab==="plan") body=planHTML(e);
+  else if(S.tab==="terceros") body=tercerosHTML(e);
+  else if(S.tab==="comprobantes") body=comprobantesHTML(e);
+  else if(S.tab==="libros") body=librosHTML(e);
+  else if(S.tab==="periodos") body=periodosHTML(e);
+
+  var demoBanner = e.demo ? '<div class="banner"><span>Estás viendo <b>datos de ejemplo</b> para conocer el sistema. Crea tu propia empresa cuando quieras.</span><button onclick="app.eliminarDemo()">Quitar ejemplo</button></div>' : "";
+
+  return '<div class="main">' + demoBanner + body + '</div>';
+}
+
+var TAB_TITLES={dashboard:["Panel","Resumen de la empresa"],plan:["Plan de cuentas","Catálogo contable configurable por grupo NIIF"],terceros:["Terceros","Clientes, proveedores y empleados"],comprobantes:["Comprobantes","Registro de movimientos contables"],libros:["Libros y estados financieros","Generados automáticamente a partir de tus comprobantes"],periodos:["Periodos","Cierre mensual con validaciones"]};
+
+function topbarHTML(){
+  var t = TAB_TITLES[S.tab];
+  var periodos = distinctPeriodos();
+  var showPeriodo = S.tab!=="plan" && S.tab!=="terceros" && S.tab!=="periodos";
+  var sel = showPeriodo ? ('<div class="period-switch"><select onchange="app.setPeriodo(this.value)">'+
+    periodos.map(function(p){return '<option value="'+p+'"'+(p===S.periodo?" selected":"")+'>'+periodoLabel(p)+'</option>';}).join("")+
+    '</select></div>') : "";
+  return '<div class="topbar"><div><h1>'+t[0]+'</h1><div class="sub">'+t[1]+'</div></div>'+sel+'</div>';
+}
+
+function dashboardHTML(e){
+  var per = S.periodo || todayPeriodo();
+  var util = utilidadAcumulada(per);
+  var sums = computeSaldos(per);
+  var activos=0,pasivos=0,patrimonioBase=0;
+  S.cuentas.forEach(function(c){
+    if(!esPostable(c.codigo)) return;
+    var n=saldoNeto(c.codigo,sums);
+    if(c.tipo==="activo") activos+=n;
+    else if(c.tipo==="pasivo") pasivos+=n;
+    else if(c.tipo==="patrimonio") patrimonioBase+=n;
+  });
+  var patrimonio = patrimonioBase+util.utilidad;
+  var voucherPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
+  var td=0,tc=0;
+  voucherPeriodo.forEach(function(v){ td+=v.total_debito||0; tc+=v.total_credito||0; });
+  var cuadra = Math.abs(td-tc)<1;
+  var cerrado = periodoCerrado(per);
+
+  var kpis = [
+    ["Total activos", fmtCOP(activos), "al cierre de "+periodoLabel(per)],
+    ["Total pasivos", fmtCOP(pasivos), ""],
+    ["Patrimonio", fmtCOP(patrimonio), "incluye utilidad acumulada"],
+    ["Utilidad del ejercicio", fmtCOP(util.utilidad), "acumulado del año a "+periodoLabel(per)]
+  ];
+  var kpiHTML = kpis.map(function(k){return '<div class="card kpi"><div class="lbl">'+k[0]+'</div><div class="val">'+k[1]+'</div><div class="foot">'+k[2]+'</div></div>';}).join("");
+
+  var recientes = S.comprobantes.slice().sort(function(a,b){return (b._id||"").localeCompare(a._id||"");}).slice(0,6);
+  var recRows = recientes.map(function(c){
+    return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td></tr>';
+  }).join("") || '<tr><td colspan="4" class="small" style="padding:16px 10px">Aún no hay comprobantes en esta empresa.</td></tr>';
+
+  return topbarHTML() +
+  '<div class="kpi-grid">'+kpiHTML+'</div>' +
+  '<div class="grid-2">' +
+    '<div class="card card-pad">' +
+      '<div class="section-title">Comprobantes recientes</div>' +
+      '<div class="table-wrap"><table class="data"><thead><tr><th>No.</th><th>Fecha</th><th>Descripción</th><th class="num">Valor</th></tr></thead><tbody>'+recRows+'</tbody></table></div>' +
+    '</div>' +
+    '<div class="card card-pad">' +
+      '<div class="section-title">Estado del periodo</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px">' +
+        '<div>'+(cerrado?'<span class="chip chip-good"><span class="chip-dot"></span>Periodo cerrado</span>':'<span class="chip chip-warn"><span class="chip-dot"></span>Periodo abierto</span>')+'</div>' +
+        '<div>'+(cuadra?'<span class="chip chip-good"><span class="chip-dot"></span>Débitos y créditos cuadran</span>':'<span class="chip chip-bad"><span class="chip-dot"></span>Descuadre: '+fmtCOP(td-tc)+'</span>')+'</div>' +
+        '<div class="small">'+voucherPeriodo.length+' comprobante(s) en '+periodoLabel(per)+'</div>' +
+        '<a class="link" onclick="app.setTab(\'periodos\')" style="font-size:12.5px">Ir a Periodos →</a>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function planHTML(e){
+  var grupos={};
+  S.cuentas.forEach(function(c){ var g=c.codigo[0]; grupos[g]=grupos[g]||[]; grupos[g].push(c); });
+  var rows="";
+  Object.keys(grupos).sort().forEach(function(g){
+    grupos[g].forEach(function(c){
+      var cls = c.nivel===0? "acct-head" : "";
+      var indent = c.nivel===1?"indent-1":(c.nivel===2?"indent-2":"");
+      rows += '<tr class="'+cls+'"><td class="acct-code '+indent+'">'+c.codigo+'</td><td class="'+indent+'">'+esc(c.nombre)+'</td><td>'+(c.postable?cap(c.tipo):"")+'</td><td>'+(c.postable?cap(c.naturaleza):"")+'</td></tr>';
+    });
+  });
+  return topbarHTML() +
+  '<div class="toolbar"><div class="small">'+S.cuentas.filter(function(c){return c.postable;}).length+' cuentas activas para registrar movimientos</div><button class="btn btn-sm" onclick="app.openNuevaCuenta()">+ Nueva cuenta</button></div>' +
+  '<div class="card table-wrap"><table class="data"><thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Naturaleza</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+function cap(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : ""; }
+
+function tercerosHTML(e){
+  var rows = S.terceros.map(function(t){
+    return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td><a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
+  }).join("") || '<tr><td colspan="4" class="small" style="padding:16px 10px">No hay terceros registrados.</td></tr>';
+  return topbarHTML() +
+  '<div class="toolbar"><div class="small">'+S.terceros.length+' terceros</div><button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button></div>' +
+  '<div class="card table-wrap"><table class="data"><thead><tr><th>Nombre</th><th>Identificación</th><th>Tipo</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function comprobantesHTML(e){
+  var per = S.periodo || todayPeriodo();
+  var list = S.comprobantes.filter(function(c){return c.periodo===per;}).slice().sort(function(a,b){return (a._id||"").localeCompare(b._id||"");});
+  var rows = list.map(function(c){
+    var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
+    return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
+      '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
+  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay comprobantes en '+periodoLabel(per)+'.</td></tr>';
+  return topbarHTML() +
+  '<div class="toolbar"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div><button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div>' +
+  '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function librosHTML(e){
+  var per = S.periodo || todayPeriodo();
+  var subtabs = [["diario","Libro diario"],["mayor","Libro mayor"],["balance","Balance de prueba"],["bg","Balance general"],["er","Estado de resultados"]];
+  var tabsHTML = '<div class="tabs-sub">'+subtabs.map(function(t){return '<button class="'+(S.libroSub===t[0]?"active":"")+'" onclick="app.setLibroSub(\''+t[0]+'\')">'+t[1]+'</button>';}).join("")+'</div>';
+  var content="";
+  if(S.libroSub==="diario") content=libroDiarioHTML(per);
+  else if(S.libroSub==="mayor") content=libroMayorHTML(per);
+  else if(S.libroSub==="balance") content=balancePruebaHTML(per);
+  else if(S.libroSub==="bg") content=balanceGeneralHTML(per);
+  else if(S.libroSub==="er") content=estadoResultadosHTML(per);
+  return topbarHTML() + '<div class="toolbar">'+tabsHTML+'</div>' + content;
+}
+
+function libroDiarioHTML(per){
+  var list = S.comprobantes.filter(function(c){return c.periodo===per;}).slice().sort(function(a,b){return (a._id||"").localeCompare(b._id||"");});
+  var rows="";
+  list.forEach(function(c){
+    rows += '<tr class="hdr-row"><td colspan="2">'+c._id+' · '+fmtDate(c.fecha)+'</td><td colspan="2">'+esc(c.descripcion)+'</td><td class="num"></td><td class="num"></td></tr>';
+    (c.lineas||[]).forEach(function(l){
+      var ac = cuentaByCodigo(l.cuenta);
+      var terc = l.tercero? terceroById(l.tercero):null;
+      rows += '<tr><td class="mono acct-code indent-1">'+l.cuenta+'</td><td>'+esc(ac?ac.nombre:"")+'</td><td colspan="2">'+esc(l.detalle||"")+(terc?" · "+esc(terc.nombre):"")+'</td><td class="num">'+(l.debito?fmtCOP(l.debito):"")+'</td><td class="num">'+(l.credito?fmtCOP(l.credito):"")+'</td></tr>';
+    });
+  });
+  if(!list.length) rows='<tr><td colspan="6" class="small" style="padding:16px 10px">Sin movimientos en '+periodoLabel(per)+'.</td></tr>';
+  return '<div class="card table-wrap"><table class="data"><thead><tr><th>Cuenta</th><th>Nombre</th><th colspan="2">Detalle</th><th class="num">Débito</th><th class="num">Crédito</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function libroMayorHTML(per){
+  var ini = computeSaldos(prevPeriodo(per));
+  var mov = movimientosPeriodo(per);
+  var rows="";
+  S.cuentas.filter(function(c){return c.postable;}).forEach(function(c){
+    var si = saldoNeto(c.codigo, ini);
+    var m = mov[c.codigo]||{d:0,c:0};
+    if(!si && !m.d && !m.c) return;
+    var sf = c.naturaleza==="debito" ? si+m.d-m.c : si+m.c-m.d;
+    rows += '<tr><td class="mono acct-code">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(si)+'</td><td class="num">'+fmtCOP(m.d)+'</td><td class="num">'+fmtCOP(m.c)+'</td><td class="num">'+fmtCOP(sf)+'</td></tr>';
+  });
+  if(!rows) rows='<tr><td colspan="6" class="small" style="padding:16px 10px">Sin movimientos en '+periodoLabel(per)+'.</td></tr>';
+  return '<div class="card table-wrap"><table class="data"><thead><tr><th>Cuenta</th><th>Nombre</th><th class="num">Saldo inicial</th><th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Saldo final</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+function balancePruebaHTML(per){
+  var sums = computeSaldos(per);
+  var rows=""; var tD=0,tC=0;
+  S.cuentas.filter(function(c){return c.postable;}).forEach(function(c){
+    var s=sums[c.codigo]||{d:0,c:0};
+    if(!s.d && !s.c) return;
+    tD+=s.d; tC+=s.c;
+    var n=saldoNeto(c.codigo,sums);
+    rows += '<tr><td class="mono acct-code">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(s.d)+'</td><td class="num">'+fmtCOP(s.c)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+  });
+  if(!rows) rows='<tr><td colspan="5" class="small" style="padding:16px 10px">Sin movimientos.</td></tr>';
+  var cuadra = Math.abs(tD-tC)<1;
+  return '<div class="card table-wrap"><table class="data"><thead><tr><th>Cuenta</th><th>Nombre</th><th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Saldo</th></tr></thead><tbody>'+rows+
+    '<tr class="total-row"><td colspan="2">Totales — acumulado a '+periodoLabel(per)+'</td><td class="num">'+fmtCOP(tD)+'</td><td class="num">'+fmtCOP(tC)+'</td><td class="num">'+(cuadra?'<span class="chip chip-good">Cuadra</span>':'<span class="chip chip-bad">No cuadra</span>')+'</td></tr>' +
+    '</tbody></table></div>';
+}
+
+function balanceGeneralHTML(per){
+  var sums=computeSaldos(per); var util=utilidadAcumulada(per);
+  function block(tipo){
+    var rows=""; var sub=0;
+    S.cuentas.filter(function(c){return c.postable && c.tipo===tipo;}).forEach(function(c){
+      var n=saldoNeto(c.codigo,sums); if(!n) return; sub+=n;
+      rows+='<tr><td class="mono acct-code indent-1">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+    });
+    return {rows:rows,total:sub};
+  }
+  var act=block("activo"), pas=block("pasivo"), pat=block("patrimonio");
+  var patTotal = pat.total + util.utilidad;
+  var html = '<div class="grid-2">' +
+    '<div class="card card-pad"><div class="section-title">Activo</div><table class="data">'+act.rows+'<tr class="total-row"><td colspan="2">Total activo</td><td class="num">'+fmtCOP(act.total)+'</td></tr></table></div>' +
+    '<div class="card card-pad"><div class="section-title">Pasivo y patrimonio</div><table class="data">'+pas.rows+'<tr class="total-row"><td colspan="2">Total pasivo</td><td class="num">'+fmtCOP(pas.total)+'</td></tr>'+pat.rows+
+      '<tr><td class="mono acct-code indent-1">—</td><td>Utilidad del ejercicio (acumulada)</td><td class="num">'+fmtCOP(util.utilidad)+'</td></tr>' +
+      '<tr class="total-row"><td colspan="2">Total patrimonio</td><td class="num">'+fmtCOP(patTotal)+'</td></tr>' +
+      '<tr class="total-row"><td colspan="2">Total pasivo + patrimonio</td><td class="num">'+fmtCOP(pas.total+patTotal)+'</td></tr></table></div>' +
+  '</div>' +
+  '<div class="small" style="margin-top:10px">Balance general al cierre de '+periodoLabel(per)+'. '+(Math.abs(act.total-(pas.total+patTotal))<1?'<span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Activo = Pasivo + Patrimonio</span>':'<span class="chip chip-bad" style="margin-left:4px">Descuadrado</span>')+'</div>';
+  return html;
+}
+
+function estadoResultadosHTML(per){
+  var util=utilidadAcumulada(per); var sums=computeSaldos(per);
+  function block(tipo){
+    var rows=""; var sub=0;
+    S.cuentas.filter(function(c){return c.postable && c.tipo===tipo;}).forEach(function(c){
+      var n=saldoNeto(c.codigo,sums); if(!n) return; sub+=n;
+      rows+='<tr><td class="mono acct-code indent-1">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+    });
+    return {rows:rows,total:sub};
+  }
+  var ing=block("ingreso"), cos=block("costo"), gas=block("gasto");
+  return '<div class="card card-pad"><div class="section-title">Acumulado desde enero hasta '+periodoLabel(per)+'</div><table class="data">' +
+    '<tr class="hdr-row"><td colspan="3">Ingresos</td></tr>'+ing.rows+'<tr class="total-row"><td colspan="2">Total ingresos</td><td class="num">'+fmtCOP(ing.total)+'</td></tr>' +
+    '<tr class="hdr-row"><td colspan="3">Costo de ventas</td></tr>'+cos.rows+'<tr class="total-row"><td colspan="2">Total costos</td><td class="num">'+fmtCOP(cos.total)+'</td></tr>' +
+    '<tr class="hdr-row"><td colspan="3">Gastos operacionales</td></tr>'+gas.rows+'<tr class="total-row"><td colspan="2">Total gastos</td><td class="num">'+fmtCOP(gas.total)+'</td></tr>' +
+    '<tr class="total-row" style="font-size:14.5px"><td colspan="2">Utilidad / pérdida del ejercicio</td><td class="num">'+fmtCOP(util.utilidad)+'</td></tr>' +
+  '</table></div>';
+}
+
+function periodosHTML(e){
+  var periodos = distinctPeriodos().slice().reverse();
+  var rows = periodos.map(function(p){
+    var list = S.comprobantes.filter(function(c){return c.periodo===p;});
+    var td=0,tc=0;
+    list.forEach(function(v){ td+=v.total_debito||0; tc+=v.total_credito||0; });
+    var cuadra = Math.abs(td-tc)<1;
+    var cerrado = periodoCerrado(p);
+    var estadoChip = cerrado? '<span class="chip chip-good"><span class="chip-dot"></span>Cerrado</span>' : '<span class="chip chip-warn"><span class="chip-dot"></span>Abierto</span>';
+    var accion = cerrado ?
+      '<a class="link" onclick="app.reabrirPeriodo(\''+p+'\')">Reabrir</a>' :
+      (list.length? '<a class="link" onclick="app.cerrarPeriodo(\''+p+'\')">Cerrar periodo</a>' : '<span class="small">Sin comprobantes</span>');
+    return '<tr><td>'+periodoLabel(p)+'</td><td>'+list.length+'</td><td class="num">'+fmtCOP(td)+'</td><td class="num">'+fmtCOP(tc)+'</td><td>'+(cuadra?'<span class="chip chip-good"><span class="chip-dot"></span>Cuadra</span>':'<span class="chip chip-bad"><span class="chip-dot"></span>No cuadra</span>')+'</td><td>'+estadoChip+'</td><td>'+accion+'</td></tr>';
+  }).join("");
+  return topbarHTML() +
+  '<div class="card table-wrap"><table class="data"><thead><tr><th>Periodo</th><th>Comprobantes</th><th class="num">Total débitos</th><th class="num">Total créditos</th><th>Cuadre</th><th>Estado</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+  '<p class="small" style="margin-top:10px">Cerrar un periodo valida que débitos = créditos, y bloquea nuevos cambios en ese mes.</p>';
+}
+
+/* ---------- modals: empresa ---------- */
+function nuevaEmpresaModal(){
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal"><div class="modal-head"><h3>Nueva empresa</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+  '<div class="modal-body">' +
+    '<div class="field"><label>Nombre o razón social</label><input id="f-nombre" placeholder="Ej. Comercializadora XYZ S.A.S."></div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label>NIT</label><input id="f-nit" placeholder="900123456-7"></div>' +
+      '<div class="field"><label>Sector</label><input id="f-sector" placeholder="Comercio, servicios, manufactura…"></div>' +
+    '</div>' +
+    '<div class="field"><label>Grupo NIIF</label><div class="radio-group">' +
+      [1,2,3].map(function(g){return '<div class="radio-opt'+(g===2?" sel":"")+'" id="niif-'+g+'" onclick="app.pickNiif('+g+')">Grupo '+g+'</div>';}).join('') +
+    '</div><div class="small" style="margin-top:6px">1: emisores de valores/interés público · 2: PYMES (la mayoría de tus clientes) · 3: microempresas</div></div>' +
+  '</div>' +
+  '<div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitNuevaEmpresa()">Crear empresa</button></div>' +
+  '</div></div>';
+}
+var pendingNiif=2;
+
+function nuevoTerceroModal(){
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:440px"><div class="modal-head"><h3>Nuevo tercero</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+  '<div class="modal-body">' +
+    '<div class="field"><label>Nombre</label><input id="t-nombre" placeholder="Nombre completo o razón social"></div>' +
+    '<div class="field-row"><div class="field"><label>Identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div>' +
+    '<div class="field"><label>Tipo</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor">Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div></div>' +
+  '</div><div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitTercero()">Guardar</button></div></div></div>';
+}
+function nuevaCuentaModal(){
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:440px"><div class="modal-head"><h3>Nueva cuenta</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+  '<div class="modal-body">' +
+    '<div class="field-row"><div class="field"><label>Código (4 o 6 dígitos)</label><input id="c-codigo" placeholder="Ej. 5199"></div>' +
+    '<div class="field"><label>Tipo</label><select id="c-tipo"><option value="activo">Activo</option><option value="pasivo">Pasivo</option><option value="patrimonio">Patrimonio</option><option value="ingreso">Ingreso</option><option value="gasto">Gasto</option><option value="costo">Costo</option></select></div></div>' +
+    '<div class="field"><label>Nombre</label><input id="c-nombre" placeholder="Nombre de la cuenta"></div>' +
+  '</div><div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitCuenta()">Guardar</button></div></div></div>';
+}
+
+/* ---------- modal: comprobante ---------- */
+var draftLineas=[];
+var draftTipo="NC", draftFecha=todayISO(), draftDescripcion="", draftPeriodo=null, draftId=null;
+
+function nuevoComprobanteModal(){
+  var per = S.periodo||todayPeriodo();
+  var cuentaOpts = S.cuentas.filter(function(c){return c.postable;}).map(function(c){return '<option value="'+c.codigo+'">'+c.codigo+' - '+esc(c.nombre)+'</option>';}).join("");
+  var tercOpts = '<option value="">—</option>'+S.terceros.map(function(t){return '<option value="'+t.id+'">'+esc(t.nombre)+'</option>';}).join("");
+  var tot = totalsOf(draftLineas);
+  var diff = tot.d-tot.c;
+  var lineRows = draftLineas.map(function(l,i){
+    return '<tr>' +
+      '<td><select onchange="app.updLinea('+i+',\'cuenta\',this.value)">'+cuentaOpts.replace('value="'+l.cuenta+'"','value="'+l.cuenta+'" selected')+'</select></td>' +
+      '<td><select onchange="app.updLinea('+i+',\'tercero\',this.value)">'+tercOpts.replace('value="'+l.tercero+'"','value="'+l.tercero+'" selected')+'</select></td>' +
+      '<td><input value="'+esc(l.detalle)+'" oninput="app.updLinea('+i+',\'detalle\',this.value)" placeholder="Detalle"></td>' +
+      '<td class="num"><input type="number" value="'+(l.debito||"")+'" oninput="app.updLinea('+i+',\'debito\',this.value)" placeholder="0"></td>' +
+      '<td class="num"><input type="number" value="'+(l.credito||"")+'" oninput="app.updLinea('+i+',\'credito\',this.value)" placeholder="0"></td>' +
+      '<td><button class="line-del" onclick="app.delLinea('+i+')">✕</button></td>' +
+    '</tr>';
+  }).join("");
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:760px"><div class="modal-head"><h3>'+(draftId?"Editar comprobante":"Nuevo comprobante")+'</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+  '<div class="modal-body">' +
+    '<div class="field-row3">' +
+      '<div class="field"><label>Tipo</label><select id="v-tipo" onchange="app.setDraftField(\'tipo\',this.value)">'+COMPROB_TIPOS.map(function(t){return '<option value="'+t.k+'"'+(t.k===draftTipo?" selected":"")+'>'+t.label+'</option>';}).join("")+'</select></div>' +
+      '<div class="field"><label>Fecha</label><input type="date" id="v-fecha" value="'+draftFecha+'" onchange="app.setDraftField(\'fecha\',this.value)"></div>' +
+      '<div class="field"><label>Periodo</label><input id="v-periodo" value="'+(draftPeriodo||per)+'" disabled></div>' +
+    '</div>' +
+    '<div class="field"><label>Descripción</label><input id="v-desc" value="'+esc(draftDescripcion)+'" oninput="app.setDraftField(\'descripcion\',this.value)" placeholder="Concepto del comprobante"></div>' +
+    '<div class="table-wrap"><table class="data lines-table"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Detalle</th><th class="num">Débito</th><th class="num">Crédito</th><th></th></tr></thead><tbody>'+lineRows+'</tbody></table></div>' +
+    '<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="app.addLinea()">+ Agregar línea</button>' +
+    '<div class="totals-bar"><div><span class="t-lbl">Débitos</span><span class="t-val" id="v-totd">'+fmtCOP(tot.d)+'</span></div><div><span class="t-lbl">Créditos</span><span class="t-val" id="v-totc">'+fmtCOP(tot.c)+'</span></div><div class="'+(Math.abs(diff)<0.5&&tot.d>0?"diff-ok":"diff-off")+'" id="v-diffbox"><span class="t-lbl">Diferencia</span><span class="t-val" id="v-diff">'+fmtCOP(diff)+'</span></div></div>' +
+  '</div>' +
+  '<div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" id="v-savebtn" '+(Math.abs(diff)<0.5&&tot.d>0?"":"disabled")+' onclick="app.submitComprobante()">Guardar comprobante</button></div>' +
+  '</div></div>';
+}
+
+/* ---------- public app object ---------- */
+window.app = {
+  setTab: function(t){ S.tab=t; render(); },
+  setLibroSub: function(t){ S.libroSub=t; render(); },
+  setPeriodo: function(p){ S.periodo=p; render(); },
+  pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
+  backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
+  closeModal: closeModal,
+  logout: doLogout,
+
+  openNuevaEmpresa: function(){ pendingNiif=2; openModal(nuevaEmpresaModal()); },
+  pickNiif: function(g){ pendingNiif=g; openModal(nuevaEmpresaModal()); },
+  submitNuevaEmpresa: function(){
+    var n=document.getElementById("f-nombre").value.trim();
+    var nit=document.getElementById("f-nit").value.trim();
+    var sec=document.getElementById("f-sector").value.trim();
+    if(!n){ alert("Escribe el nombre de la empresa."); return; }
+    crearEmpresa(n,nit,sec,pendingNiif);
+  },
+  crearDemo: crearEmpresaDemo,
+  eliminarDemo: eliminarEmpresaDemo,
+
+  openNuevoTercero: function(){ openModal(nuevoTerceroModal()); },
+  submitTercero: function(){
+    var n=document.getElementById("t-nombre").value.trim();
+    var i=document.getElementById("t-ident").value.trim();
+    var t=document.getElementById("t-tipo").value;
+    if(!n){ alert("Escribe el nombre del tercero."); return; }
+    guardarTercero(n,i,t);
+  },
+  eliminarTercero: eliminarTercero,
+
+  openNuevaCuenta: function(){ openModal(nuevaCuentaModal()); },
+  submitCuenta: function(){
+    var c=document.getElementById("c-codigo").value.trim();
+    var n=document.getElementById("c-nombre").value.trim();
+    var t=document.getElementById("c-tipo").value;
+    if(!/^\d{4,6}$/.test(c)){ alert("El código debe tener 4 o 6 dígitos."); return; }
+    if(!n){ alert("Escribe el nombre de la cuenta."); return; }
+    guardarCuenta(c,n,t);
+  },
+
+  openNuevoComprobante: function(){
+    draftId=null; draftTipo="NC"; draftFecha=todayISO(); draftDescripcion=""; draftPeriodo=S.periodo||todayPeriodo();
+    var first=(S.cuentas.find(function(c){return c.postable;})||{}).codigo||"";
+    draftLineas=[{cuenta:first,tercero:"",detalle:"",debito:0,credito:0},{cuenta:first,tercero:"",detalle:"",debito:0,credito:0}];
+    openModal(nuevoComprobanteModal());
+  },
+  verComprobante: function(numero){
+    var c=S.comprobantes.find(function(x){return x._id===numero;});
+    if(!c) return;
+    draftId=c._id; draftTipo=c.tipo; draftFecha=c.fecha; draftDescripcion=c.descripcion; draftPeriodo=c.periodo;
+    draftLineas=(c.lineas||[]).map(function(l){return {cuenta:l.cuenta,tercero:l.tercero||"",detalle:l.detalle||"",debito:l.debito||0,credito:l.credito||0};});
+    openModal(nuevoComprobanteModal());
+  },
+  setDraftField: function(k,v){
+    if(k==="tipo") draftTipo=v;
+    else if(k==="fecha"){
+      draftFecha=v; draftPeriodo=v.slice(0,7);
+      var pel=document.getElementById("v-periodo"); if(pel) pel.value=draftPeriodo;
+    }
+    else if(k==="descripcion") draftDescripcion=v;
+  },
+  addLinea: function(){
+    var first=(S.cuentas.find(function(c){return c.postable;})||{}).codigo||"";
+    draftLineas.push({cuenta:first,tercero:"",detalle:"",debito:0,credito:0}); openModal(nuevoComprobanteModal());
+  },
+  delLinea: function(i){ draftLineas.splice(i,1); openModal(nuevoComprobanteModal()); },
+  updLinea: function(i,field,val){
+    if(field==="debito"||field==="credito") draftLineas[i][field]=parseFloat(val)||0;
+    else draftLineas[i][field]=val;
+    if(field==="cuenta"||field==="tercero"){ openModal(nuevoComprobanteModal()); return; }
+    if(field==="debito"||field==="credito"){ refreshTotalsBar(); }
+  },
+  submitComprobante: function(){
+    if(!draftDescripcion.trim()){ alert("Escribe una descripción para el comprobante."); return; }
+    guardarComprobante({_id:draftId, tipo:draftTipo, fecha:draftFecha, periodo:draftPeriodo||draftFecha.slice(0,7), descripcion:draftDescripcion, lineas:draftLineas});
+  },
+  eliminarComprobante: eliminarComprobante,
+
+  cerrarPeriodo: function(p){
+    var list=S.comprobantes.filter(function(c){return c.periodo===p;});
+    var td=0,tc=0;
+    list.forEach(function(v){ td+=v.total_debito||0; tc+=v.total_credito||0; });
+    if(Math.abs(td-tc)>=1){ alert("Los débitos y créditos del periodo no cuadran. Corrígelo antes de cerrar."); return; }
+    if(!confirm("¿Cerrar "+periodoLabel(p)+"? No podrás crear ni editar comprobantes de este mes hasta reabrirlo.")) return;
+    cerrarPeriodoDb(p, td, tc);
+  },
+  reabrirPeriodo: function(p){
+    if(!confirm("¿Reabrir "+periodoLabel(p)+"?")) return;
+    reabrirPeriodoDb(p);
+  }
+};
+
+boot();
+})();
+</script>
+</body>
+</html>
