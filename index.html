@@ -411,14 +411,22 @@ async function selectEmpresa(id){
   S.empresaChannels = [chC,chT,chP,chD];
 }
 async function loadAllRows(table, id){
-  var all=[], from=0, pageSize=1000;
-  while(true){
-    var res = await sb.from(table).select("*").eq("empresa_id",id).range(from, from+pageSize-1);
-    if(res.error){ console.error(res.error); break; }
-    var chunk = res.data||[];
-    all = all.concat(chunk);
-    if(chunk.length < pageSize) break;
-    from += pageSize;
+  var pageSize=1000;
+  var first = await sb.from(table).select("*",{count:"exact"}).eq("empresa_id",id).range(0, pageSize-1);
+  if(first.error){ console.error(first.error); return []; }
+  var all = first.data||[];
+  var total = first.count==null ? all.length : first.count;
+  var pages = Math.ceil(total/pageSize);
+  if(pages>1){
+    var reqs=[];
+    for(var p=1;p<pages;p++){
+      reqs.push(sb.from(table).select("*").eq("empresa_id",id).range(p*pageSize, p*pageSize+pageSize-1));
+    }
+    var results = await Promise.all(reqs);
+    results.forEach(function(res){
+      if(res.error) console.error(res.error);
+      else all = all.concat(res.data||[]);
+    });
   }
   return all;
 }
@@ -818,7 +826,7 @@ async function confirmImport(){
     var tot = totalsOf(r.lineas);
     return {empresa_id:S.empresaId, numero:numero, tipo:r.tipo, fecha:r.fecha, periodo:periodo, descripcion:r.descripcion, lineas:r.lineas, total_debito:tot.d, total_credito:tot.c, estado:"contabilizado", cufe:r.cufe||null};
   });
-  var CHUNK=250, done=0;
+  var CHUNK=500, done=0;
   for(var i=0;i<toInsert.length;i+=CHUNK){
     var batch = toInsert.slice(i, i+CHUNK);
     var res = await sb.from("comprobantes").insert(batch);
