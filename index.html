@@ -317,6 +317,13 @@ function todayISO(){var d=new Date();return d.toISOString().slice(0,10);}
 function todayPeriodo(){return todayISO().slice(0,7);}
 function prevPeriodo(p){var y=parseInt(p.slice(0,4),10),m=parseInt(p.slice(5,7),10); m--; if(m<1){m=12;y--;} return y+"-"+String(m).padStart(2,"0");}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function debounce(fn, ms){
+  var t=null;
+  return function(){
+    if(t) clearTimeout(t);
+    t = setTimeout(fn, ms||600);
+  };
+}
 
 /* ---------- boot / auth ---------- */
 function boot(){
@@ -380,10 +387,10 @@ async function selectEmpresa(id){
   if(!id) return;
   await Promise.all([loadCuentas(id), loadTerceros(id), loadComprobantes(id), loadPeriodos(id)]);
   render();
-  var chC = sb.channel("cuentas-"+id).on("postgres_changes",{event:"*",schema:"public",table:"cuentas",filter:"empresa_id=eq."+id},function(){ loadCuentas(id).then(render); }).subscribe();
-  var chT = sb.channel("terceros-"+id).on("postgres_changes",{event:"*",schema:"public",table:"terceros",filter:"empresa_id=eq."+id},function(){ loadTerceros(id).then(render); }).subscribe();
-  var chP = sb.channel("comprobantes-"+id).on("postgres_changes",{event:"*",schema:"public",table:"comprobantes",filter:"empresa_id=eq."+id},function(){ loadComprobantes(id).then(render); }).subscribe();
-  var chD = sb.channel("periodos-"+id).on("postgres_changes",{event:"*",schema:"public",table:"periodos",filter:"empresa_id=eq."+id},function(){ loadPeriodos(id).then(render); }).subscribe();
+  var chC = sb.channel("cuentas-"+id).on("postgres_changes",{event:"*",schema:"public",table:"cuentas",filter:"empresa_id=eq."+id},debounce(function(){ loadCuentas(id).then(render); })).subscribe();
+  var chT = sb.channel("terceros-"+id).on("postgres_changes",{event:"*",schema:"public",table:"terceros",filter:"empresa_id=eq."+id},debounce(function(){ loadTerceros(id).then(render); })).subscribe();
+  var chP = sb.channel("comprobantes-"+id).on("postgres_changes",{event:"*",schema:"public",table:"comprobantes",filter:"empresa_id=eq."+id},debounce(function(){ loadComprobantes(id).then(render); })).subscribe();
+  var chD = sb.channel("periodos-"+id).on("postgres_changes",{event:"*",schema:"public",table:"periodos",filter:"empresa_id=eq."+id},debounce(function(){ loadPeriodos(id).then(render); })).subscribe();
   S.empresaChannels = [chC,chT,chP,chD];
 }
 async function loadCuentas(id){
@@ -703,6 +710,7 @@ async function confirmImport(){
       alert("Se importaron "+done+" de "+toInsert.length+" antes de un error: "+res.error.message+". Los ya importados quedaron guardados; puedes reintentar con el resto más tarde.");
       return;
     }
+    batch.forEach(function(row){ var r=Object.assign({},row); r._id=r.numero; S.comprobantes.push(r); });
     done += batch.length;
     S.importProgress = {done:done, total:toInsert.length};
     render();
