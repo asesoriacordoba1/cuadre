@@ -928,6 +928,10 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       payable: total-reteIva-reteRenta-reteIca, reteIva: reteIva, reteRenta: reteRenta, reteIca: reteIca
     };
     lineas = lineasDesdeReglas(documentoKey, tMatch?tMatch.regimen:"", reglas, ctx);
+    if(lineas){
+      var totR = totalsOf(lineas);
+      if(Math.abs(totR.d-totR.c)>=1) lineas = null;
+    }
   }
   var porReglas = !!lineas;
 
