@@ -589,9 +589,20 @@ async function eliminarComprobante(numero){
 }
 
 /* ---------- terceros ---------- */
-async function guardarTercero(nombre, ident, tipo, autorretenedor, concepto, direccion, ciudad, departamento, pais){
-  await sb.from("terceros").insert({empresa_id:S.empresaId, nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:!!autorretenedor, concepto_retencion:concepto||"",
-    direccion:direccion||"", ciudad:ciudad||"", departamento:departamento||"", pais:pais||"Colombia"});
+function nombreCompletoTercero(d){
+  if(d.es_juridica) return (d.razon_social||"").trim();
+  return [d.primer_nombre,d.otros_nombres,d.primer_apellido,d.segundo_apellido].filter(Boolean).join(" ").trim();
+}
+async function guardarTercero(d){
+  var nombre = nombreCompletoTercero(d);
+  await sb.from("terceros").insert({
+    empresa_id:S.empresaId, nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo,
+    autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"",
+    direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
+    tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
+    primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
+    primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||""
+  });
   closeModal();
 }
 async function eliminarTercero(id){
@@ -600,15 +611,16 @@ async function eliminarTercero(id){
 }
 
 /* ---------- importar terceros masivo ---------- */
+var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos)"];
 function descargarPlantillaTerceros(){
   var data = [
-    ["Nombre","Identificación","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos)","Dirección","Ciudad","Departamento","País"],
-    ["Johny Andrés Giraldo Marín","1037111222","proveedor","NO","compras","Cra 5 # 10-20","Montería","Córdoba","Colombia"],
-    ["Arrendador Ejemplo S.A.S.","900111222","proveedor","NO","arrendamientos","Cll 20 # 5-15","Cartagena","Bolívar","Colombia"],
-    ["Proveedor Régimen Simple","900333444","proveedor","SI","","","","",""]
+    TERC_HEADERS,
+    ["31","1037111222","","","","","Johny Andrés Giraldo Marín","Cra 5 # 10-20","Montería","Córdoba","Colombia","proveedor","NO","compras"],
+    ["13","1037222333","Giraldo","Marín","Johny","Andrés","","Cll 20 # 5-15","Cartagena","Bolívar","Colombia","proveedor","NO","arrendamientos"],
+    ["31","900333444","","","","","Proveedor Régimen Simple","","","","Colombia","proveedor","SI",""]
   ];
   var ws = XLSX.utils.aoa_to_sheet(data);
-  ws["!cols"] = [{wch:30},{wch:16},{wch:12},{wch:20},{wch:36},{wch:24},{wch:16},{wch:16},{wch:14}];
+  ws["!cols"] = TERC_HEADERS.map(function(){return {wch:20};});
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
   XLSX.writeFile(wb, "plantilla_terceros.xlsx");
@@ -626,23 +638,32 @@ function handleTercerosImportFile(file){
       var existing = {}; S.terceros.forEach(function(t){ if(t.identificacion) existing[normDigits(t.identificacion)]=true; });
       var rows = [];
       json.forEach(function(row){
-        var nombre = String(row["Nombre"]||"").trim();
+        var razon = String(row["Razón social informado"]||"").trim();
+        var ap1 = String(row["Primer apellido del informado"]||"").trim();
+        var ap2 = String(row["Segundo apellido del informado"]||"").trim();
+        var nom1 = String(row["Primer nombre del informado"]||"").trim();
+        var nom2 = String(row["Otros nombres del informado"]||"").trim();
+        var esJur = !!razon;
+        var d = {es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2};
+        var nombre = nombreCompletoTercero(d);
         if(!nombre) return;
-        var ident = String(row["Identificación"]||"").trim();
+        var ident = String(row["Número identificación"]||"").trim();
+        var tipoDoc = String(row["Tipo DE DOCUMENTO"]||"31").trim();
         var tipo = String(row["Tipo"]||"proveedor").trim().toLowerCase();
         if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
         var sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
         var conc = String(row["Concepto retención (compras/arrendamientos)"]||"").trim().toLowerCase();
         if(conc!=="compras" && conc!=="arrendamientos") conc="";
         var dup = !!(ident && existing[normDigits(ident)]);
-        rows.push({nombre:nombre, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc,
-          direccion:String(row["Dirección"]||"").trim(), ciudad:String(row["Ciudad"]||"").trim(),
-          departamento:String(row["Departamento"]||"").trim(), pais:String(row["País"]||"").trim()||"Colombia",
+        rows.push({nombre:nombre, es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2,
+          tipo_documento:tipoDoc, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc,
+          direccion:String(row["Dirección"]||"").trim(), ciudad:String(row["municipio"]||"").trim(),
+          departamento:String(row["departamento"]||"").trim(), pais:String(row["País de residencia o domicilio"]||"").trim()||"Colombia",
           dup:dup, include:!dup});
       });
       S.tercImportRows = rows;
       S.tercImportFileName = file.name;
-      if(!rows.length) S.tercImportErr = "No se encontraron filas con Nombre en el archivo.";
+      if(!rows.length) S.tercImportErr = "No se encontraron filas con nombre o razón social en el archivo.";
     }catch(err){
       S.tercImportErr = "No se pudo leer el archivo: "+err.message;
     }
@@ -655,7 +676,9 @@ async function confirmTercImport(){
   if(!rows.length) return;
   var toInsert = rows.map(function(r){
     return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion,
-      direccion:r.direccion, ciudad:r.ciudad, departamento:r.departamento, pais:r.pais};
+      direccion:r.direccion, ciudad:r.ciudad, departamento:r.departamento, pais:r.pais,
+      tipo_documento:r.tipo_documento, es_juridica:r.es_juridica, primer_apellido:r.primer_apellido, segundo_apellido:r.segundo_apellido,
+      primer_nombre:r.primer_nombre, otros_nombres:r.otros_nombres, razon_social:r.razon_social};
   });
   var res = await sb.from("terceros").insert(toInsert);
   if(res.error){ alert("Error al importar: "+res.error.message); return; }
@@ -1396,14 +1419,33 @@ function nuevaEmpresaModal(){
 }
 var pendingNiif=2;
 
+var DIAN_DOC_TYPES = [
+  ["11","Registro civil de nacimiento"],["12","Tarjeta de identidad"],["13","Cédula de ciudadanía"],
+  ["14","Certificado Registraduría (sucesión ilíquida sin doc.)"],["15","Doc. sucesión ilíquida (notaría/juzgado)"],
+  ["21","Tarjeta de extranjería"],["22","Cédula de extranjería"],["31","NIT"],
+  ["33","Identificación extranjeros diferente a NIT"],["41","Pasaporte"],["42","Documento identificación extranjero"],
+  ["43","Sin identificación del exterior"],["44","Documento identificación extranjero persona jurídica"],
+  ["46","Carné diplomático"]
+];
+var pendingEsJuridica = true;
 function nuevoTerceroModal(){
-  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:460px"><div class="modal-head"><h3>Nuevo tercero</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+  var docOpts = DIAN_DOC_TYPES.map(function(d){return '<option value="'+d[0]+'">'+d[0]+' - '+d[1]+'</option>';}).join("");
+  var nombreFields = pendingEsJuridica ?
+    '<div class="field"><label>Razón social</label><input id="t-razon" placeholder="Nombre de la empresa"></div>' :
+    '<div class="field-row"><div class="field"><label>Primer apellido</label><input id="t-ap1"></div><div class="field"><label>Segundo apellido</label><input id="t-ap2"></div></div>' +
+    '<div class="field-row"><div class="field"><label>Primer nombre</label><input id="t-nom1"></div><div class="field"><label>Otros nombres</label><input id="t-nom2"></div></div>';
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:480px"><div class="modal-head"><h3>Nuevo tercero</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
   '<div class="modal-body">' +
-    '<div class="field"><label>Nombre</label><input id="t-nombre" placeholder="Nombre completo o razón social"></div>' +
-    '<div class="field-row"><div class="field"><label>Identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div>' +
-    '<div class="field"><label>Tipo</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor">Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div></div>' +
+    '<div class="radio-group" style="margin-bottom:13px">' +
+      '<div class="radio-opt'+(pendingEsJuridica?" sel":"")+'" onclick="app.setEsJuridica(true)">Persona jurídica</div>' +
+      '<div class="radio-opt'+(!pendingEsJuridica?" sel":"")+'" onclick="app.setEsJuridica(false)">Persona natural</div>' +
+    '</div>' +
+    nombreFields +
+    '<div class="field-row"><div class="field"><label>Tipo de documento</label><select id="t-tipodoc">'+docOpts+'</select></div>' +
+    '<div class="field"><label>Número identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div></div>' +
+    '<div class="field"><label>Tipo (en Cuadre)</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor" selected>Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div>' +
     '<div class="field"><label>Dirección</label><input id="t-direccion" placeholder="Cra / Calle..."></div>' +
-    '<div class="field-row3"><div class="field"><label>Ciudad</label><input id="t-ciudad"></div>' +
+    '<div class="field-row3"><div class="field"><label>Municipio</label><input id="t-ciudad"></div>' +
     '<div class="field"><label>Departamento</label><input id="t-departamento"></div>' +
     '<div class="field"><label>País</label><input id="t-pais" value="Colombia"></div></div>' +
     '<div class="field" style="background:var(--surface-2);border-radius:8px;padding:10px;margin-top:2px">' +
@@ -1480,19 +1522,28 @@ window.app = {
   crearDemo: crearEmpresaDemo,
   eliminarDemo: eliminarEmpresaDemo,
 
-  openNuevoTercero: function(){ openModal(nuevoTerceroModal()); },
+  openNuevoTercero: function(){ pendingEsJuridica=true; openModal(nuevoTerceroModal()); },
+  setEsJuridica: function(v){ pendingEsJuridica=v; openModal(nuevoTerceroModal()); },
   submitTercero: function(){
-    var n=document.getElementById("t-nombre").value.trim();
-    var i=document.getElementById("t-ident").value.trim();
-    var t=document.getElementById("t-tipo").value;
-    var auto=document.getElementById("t-autorretenedor").checked;
-    var conc=document.getElementById("t-concepto").value;
-    var dir=document.getElementById("t-direccion").value.trim();
-    var ciu=document.getElementById("t-ciudad").value.trim();
-    var dep=document.getElementById("t-departamento").value.trim();
-    var pai=document.getElementById("t-pais").value.trim();
-    if(!n){ alert("Escribe el nombre del tercero."); return; }
-    guardarTercero(n,i,t,auto,conc,dir,ciu,dep,pai);
+    var d = {
+      es_juridica: pendingEsJuridica,
+      razon_social: pendingEsJuridica ? document.getElementById("t-razon").value.trim() : "",
+      primer_apellido: pendingEsJuridica ? "" : document.getElementById("t-ap1").value.trim(),
+      segundo_apellido: pendingEsJuridica ? "" : document.getElementById("t-ap2").value.trim(),
+      primer_nombre: pendingEsJuridica ? "" : document.getElementById("t-nom1").value.trim(),
+      otros_nombres: pendingEsJuridica ? "" : document.getElementById("t-nom2").value.trim(),
+      tipo_documento: document.getElementById("t-tipodoc").value,
+      identificacion: document.getElementById("t-ident").value.trim(),
+      tipo: document.getElementById("t-tipo").value,
+      autorretenedor: document.getElementById("t-autorretenedor").checked,
+      concepto_retencion: document.getElementById("t-concepto").value,
+      direccion: document.getElementById("t-direccion").value.trim(),
+      ciudad: document.getElementById("t-ciudad").value.trim(),
+      departamento: document.getElementById("t-departamento").value.trim(),
+      pais: document.getElementById("t-pais").value.trim()
+    };
+    if(!nombreCompletoTercero(d)){ alert(pendingEsJuridica?"Escribe la razón social.":"Escribe al menos el primer nombre y primer apellido."); return; }
+    guardarTercero(d);
   },
   eliminarTercero: eliminarTercero,
   descargarPlantillaTerceros: descargarPlantillaTerceros,
