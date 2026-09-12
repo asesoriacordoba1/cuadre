@@ -640,7 +640,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config){
   if(esCompra && terceros && config){
     var tProv = terceros.find(function(t){ return nitMatches(row["NIT Emisor"], t.identificacion); });
     if(tProv){
-      if(tProv.autorretenedor){ reteRenta = 0; retNota = " (autorretenedor, sin retención)"; }
+      if(tProv.autorretenedor){ reteRenta = 0; retNota = " (O-15/O-47, sin retención)"; }
       else if(tProv.concepto_retencion==="compras" || tProv.concepto_retencion==="arrendamientos"){
         var base = total - iva;
         var tasa = tProv.concepto_retencion==="compras" ? config.tasa_compras : config.tasa_arrendamientos;
@@ -1054,7 +1054,7 @@ function planHTML(e){
 function cap(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : ""; }
 
 function retencionLabel(t){
-  if(t.autorretenedor) return '<span class="chip chip-good"><span class="chip-dot"></span>Autorretenedor</span>';
+  if(t.autorretenedor) return '<span class="chip chip-good"><span class="chip-dot"></span>Sin retención (O-15/O-47)</span>';
   if(t.concepto_retencion==="compras") return '<span class="chip chip-warn">Compras 2.5%</span>';
   if(t.concepto_retencion==="arrendamientos") return '<span class="chip chip-warn">Arrendamientos 3.5%</span>';
   return '<span class="small">—</span>';
@@ -1302,7 +1302,7 @@ function nuevoTerceroModal(){
     '<div class="field-row"><div class="field"><label>Identificación</label><input id="t-ident" placeholder="C.C. / NIT"></div>' +
     '<div class="field"><label>Tipo</label><select id="t-tipo"><option value="cliente">Cliente</option><option value="proveedor">Proveedor</option><option value="empleado">Empleado</option><option value="otro">Otro</option></select></div></div>' +
     '<div class="field" style="background:var(--surface-2);border-radius:8px;padding:10px;margin-top:2px">' +
-      '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"> Es autorretenedor (no se le practica retención en la fuente)</label>' +
+      '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"> No se le practica retención (responsabilidad O-15 Autorretenedor u O-47 Régimen Simple)</label>' +
       '<label>Concepto de retención (si no es autorretenedor)</label>' +
       '<select id="t-concepto"><option value="">Ninguno</option><option value="compras">Compras (2.5%)</option><option value="arrendamientos">Arrendamientos (3.5%)</option></select>' +
     '</div>' +
