@@ -1360,6 +1360,14 @@ function planHTML(e){
     (S.reglasImportBusy? '<div class="loading"><div class="spin"></div>Procesando…</div>' : "") +
     (S.reglasImportErr? '<div class="login-err" style="margin-top:10px">'+esc(S.reglasImportErr)+'</div>' : "");
 
+  if(S.reglasCuentas.length){
+    var rowsExisting = S.reglasCuentas.map(function(r){
+      return '<tr><td>'+esc(r.documento)+'</td><td class="mono">'+esc(r.cuenta_codigo)+'</td><td>'+esc(r.cuenta_nombre)+'</td><td>'+esc(r.regimen||"(cualquiera)")+'</td><td>'+(r.debito?"Débito":"")+(r.credito?"Crédito":"")+'</td></tr>';
+    }).join("");
+    body += '<div class="table-wrap" style="margin-top:12px;max-height:260px;overflow-y:auto">' +
+      '<table class="data"><thead><tr><th>Documento</th><th>Cuenta</th><th>Nombre</th><th>Régimen</th><th>Lado</th></tr></thead><tbody>'+rowsExisting+'</tbody></table></div>';
+  }
+
   if(S.reglasImportRows && S.reglasImportRows.length){
     var inclR = S.reglasImportRows.filter(function(r){return r.include;}).length;
     var rowsR = S.reglasImportRows.slice(0,300).map(function(r,i){
