@@ -2368,7 +2368,6 @@ var draftTipo="NC", draftFecha=todayISO(), draftDescripcion="", draftPeriodo=nul
 function nuevoComprobanteModal(){
   var per = S.periodo||todayPeriodo();
   var cuentaOpts = S.cuentas.filter(function(c){return c.postable;}).map(function(c){return '<option value="'+c.codigo+'">'+c.codigo+' - '+esc(c.nombre)+'</option>';}).join("");
-  var tercOpts = '<option value="">—</option>'+S.terceros.map(function(t){return '<option value="'+t.id+'">'+esc(t.nombre)+'</option>';}).join("");
   var tot = totalsOf(draftLineas);
   var diff = tot.d-tot.c;
   var terceroDetectado = draftDescripcion ? terceroPorNombre(extractTercFromDescripcion(draftDescripcion)) : null;
@@ -2377,7 +2376,6 @@ function nuevoComprobanteModal(){
   var lineRows = draftLineas.map(function(l,i){
     return '<tr>' +
       '<td><select onchange="app.updLinea('+i+',\'cuenta\',this.value)">'+cuentaOpts.replace('value="'+l.cuenta+'"','value="'+l.cuenta+'" selected')+'</select></td>' +
-      '<td><div style="display:flex;gap:4px;align-items:center"><select onchange="app.updLinea('+i+',\'tercero\',this.value)">'+tercOpts.replace('value="'+l.tercero+'"','value="'+l.tercero+'" selected')+'</select>'+(l.tercero?' <a class="link" style="white-space:nowrap" onclick="app.editarTerceroDeLinea('+i+')" title="Editar este tercero">✎</a>':'')+'</div></td>' +
       '<td><input value="'+esc(l.detalle)+'" oninput="app.updLinea('+i+',\'detalle\',this.value)" placeholder="Detalle"></td>' +
       '<td class="num"><input type="number" value="'+(l.debito||"")+'" oninput="app.updLinea('+i+',\'debito\',this.value)" placeholder="0"></td>' +
       '<td class="num"><input type="number" value="'+(l.credito||"")+'" oninput="app.updLinea('+i+',\'credito\',this.value)" placeholder="0"></td>' +
@@ -2393,7 +2391,7 @@ function nuevoComprobanteModal(){
     '</div>' +
     '<div class="field"><label>Descripción</label><input id="v-desc" value="'+esc(draftDescripcion)+'" oninput="app.setDraftField(\'descripcion\',this.value)" placeholder="Concepto del comprobante"></div>' +
     terceroDetectadoHTML +
-    '<div class="table-wrap"><table class="data lines-table"><thead><tr><th>Cuenta</th><th>Tercero</th><th>Detalle</th><th class="num">Débito</th><th class="num">Crédito</th><th></th></tr></thead><tbody>'+lineRows+'</tbody></table></div>' +
+    '<div class="table-wrap"><table class="data lines-table"><thead><tr><th>Cuenta</th><th>Detalle</th><th class="num">Débito</th><th class="num">Crédito</th><th></th></tr></thead><tbody>'+lineRows+'</tbody></table></div>' +
     '<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="app.addLinea()">+ Agregar línea</button>' +
     '<div class="totals-bar"><div><span class="t-lbl">Débitos</span><span class="t-val" id="v-totd">'+fmtCOP(tot.d)+'</span></div><div><span class="t-lbl">Créditos</span><span class="t-val" id="v-totc">'+fmtCOP(tot.c)+'</span></div><div class="'+(Math.abs(diff)<0.5&&tot.d>0?"diff-ok":"diff-off")+'" id="v-diffbox"><span class="t-lbl">Diferencia</span><span class="t-val" id="v-diff">'+fmtCOP(diff)+'</span></div></div>' +
   '</div>' +
