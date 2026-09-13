@@ -641,7 +641,7 @@ async function guardarTercero(d){
   var nombre = nombreCompletoTercero(d);
   await sb.from("terceros").insert({
     empresa_id:S.empresaId, nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo, regimen:d.regimen||"",
-    autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"",
+    autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"", concepto_ingreso:d.concepto_ingreso||"",
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
     tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
     primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
@@ -653,7 +653,7 @@ async function actualizarTercero(id, d){
   var nombre = nombreCompletoTercero(d);
   await sb.from("terceros").update({
     nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo, regimen:d.regimen||"",
-    autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"",
+    autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"", concepto_ingreso:d.concepto_ingreso||"",
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
     tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
     primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
@@ -668,13 +668,13 @@ async function eliminarTercero(id){
 }
 
 /* ---------- importar terceros masivo ---------- */
-var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/diversos)"];
+var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/afiliaciones/publicidad/diversos)","Concepto ingreso (arriendo/semovientes)"];
 function descargarPlantillaTerceros(){
   var data = [
     TERC_HEADERS,
-    ["31","1037111222","","","","","Johny Andrés Giraldo Marín","Cra 5 # 10-20","Montería","Córdoba","Colombia","proveedor","NO","compras"],
-    ["13","1037222333","Giraldo","Marín","Johny","Andrés","","Cll 20 # 5-15","Cartagena","Bolívar","Colombia","proveedor","NO","arrendamientos"],
-    ["31","900333444","","","","","Proveedor Régimen Simple","","","","Colombia","proveedor","SI",""]
+    ["31","1037111222","","","","","Johny Andrés Giraldo Marín","Cra 5 # 10-20","Montería","Córdoba","Colombia","proveedor","NO","compras",""],
+    ["13","1037222333","Giraldo","Marín","Johny","Andrés","","Cll 20 # 5-15","Cartagena","Bolívar","Colombia","proveedor","NO","arrendamientos",""],
+    ["31","900333444","","","","","Proveedor Régimen Simple","","","","Colombia","proveedor","SI","",""]
   ];
   var ws = XLSX.utils.aoa_to_sheet(data);
   ws["!cols"] = TERC_HEADERS.map(function(){return {wch:20};});
@@ -709,12 +709,15 @@ function handleTercerosImportFile(file){
         var tipo = String(row["Tipo"]||"proveedor").trim().toLowerCase();
         if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
         var sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
-        var conc = String(row["Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/diversos)"]||"").trim().toLowerCase()
+        var conc = String(row["Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/afiliaciones/publicidad/diversos)"]||"").trim().toLowerCase()
           .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
-        if(["compras","arrendamientos","servicios_publicos","fletes","seguros","diversos"].indexOf(conc)<0) conc="";
+        if(CONCEPTOS_RETENCION.map(function(cr){return cr[0];}).indexOf(conc)<0) conc="";
+        var concIng = String(row["Concepto ingreso (arriendo/semovientes)"]||"").trim().toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
+        if(CONCEPTOS_INGRESO.map(function(ci){return ci[0];}).indexOf(concIng)<0) concIng="";
         var dup = !!(ident && existing[normDigits(ident)]);
         rows.push({nombre:nombre, es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2,
-          tipo_documento:tipoDoc, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc,
+          tipo_documento:tipoDoc, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc, concepto_ingreso:concIng,
           direccion:String(row["Dirección"]||"").trim(), ciudad:String(row["municipio"]||"").trim(),
           departamento:String(row["departamento"]||"").trim(), pais:String(row["País de residencia o domicilio"]||"").trim()||"Colombia",
           dup:dup, include:!dup});
@@ -733,7 +736,7 @@ async function confirmTercImport(){
   var rows = (S.tercImportRows||[]).filter(function(r){return r.include;});
   if(!rows.length) return;
   var toInsert = rows.map(function(r){
-    return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion,
+    return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion, concepto_ingreso:r.concepto_ingreso,
       direccion:r.direccion, ciudad:r.ciudad, departamento:r.departamento, pais:r.pais,
       tipo_documento:r.tipo_documento, es_juridica:r.es_juridica, primer_apellido:r.primer_apellido, segundo_apellido:r.segundo_apellido,
       primer_nombre:r.primer_nombre, otros_nombres:r.otros_nombres, razon_social:r.razon_social};
@@ -941,10 +944,19 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     var reten = reteIva+reteRenta+reteIca;
     lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
     if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
-    var baseV = splitGravadaExenta();
-    if(baseV.gravada>0) lineas.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% "+docRef, debito:0, credito: baseV.gravada});
-    if(baseV.exenta>0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida "+docRef, debito:0, credito: baseV.exenta});
-    if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+    var conceptoIngreso = tMatch && INGRESO_LABELS[tMatch.concepto_ingreso];
+    if(tMatch && tMatch.concepto_ingreso==="semovientes"){
+      lineas.push({cuenta:"413518", tercero:"", detalle:"Venta de animales vivos y cueros "+tercNombre+" - "+docRef, debito:0, credito: total-iva});
+    } else if(tMatch && tMatch.concepto_ingreso==="arriendo"){
+      lineas.push({cuenta:"424525", tercero:"", detalle:"Ingresos por arrendamientos "+tercNombre+" - "+docRef, debito:0, credito: total-iva});
+    } else if(conceptoIngreso){
+      lineas.push({cuenta:"4295", tercero:"", detalle:"Ingreso "+conceptoIngreso+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito:0, credito: total-iva});
+    } else {
+      var baseV = splitGravadaExenta();
+      if(baseV.gravada>0) lineas.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% "+docRef, debito:0, credito: baseV.gravada});
+      if(baseV.exenta>0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida "+docRef, debito:0, credito: baseV.exenta});
+      if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+    }
     if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
   } else {
     var conceptoGasto = tMatch && CONCEPTO_LABELS[tMatch.concepto_retencion];
@@ -954,6 +966,10 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
       if(baseC.gravada<=0 && baseC.exenta<=0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+    } else if(tMatch && tMatch.concepto_retencion==="fletes"){
+      lineas.push({cuenta:"513551", tercero:"", detalle:"Fletes y transporte "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+    } else if(tMatch && tMatch.concepto_retencion==="servicios_publicos"){
+      lineas.push({cuenta:"513540", tercero:"", detalle:"Servicios públicos "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
     } else if(conceptoGasto){
       lineas.push({cuenta:"5195", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
     } else {
@@ -969,7 +985,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
 
   var porReglas = false;
   if(reglas && reglas.length){
-    var documentoKey = esVenta ? (esNC?"Devolucion en Ventas":"Factura de Venta") :
+    var documentoKey = esVenta ?
+      (esNC ? "Devolucion en Ventas" : ((tMatch && INGRESO_DOC_KEYS[tMatch.concepto_ingreso]) || "Factura de Venta")) :
       (esNC ? "Devolucion en Compras" : ((tMatch && CONCEPTO_DOC_KEYS[tMatch.concepto_retencion]) || "Factura de Compra"));
     var regimenBuscado = tMatch?tMatch.regimen:"";
     var matches = reglas.filter(function(r){ return r.documento===documentoKey; });
@@ -1435,11 +1452,13 @@ function planHTML(e){
 function cap(s){ return s? s.charAt(0).toUpperCase()+s.slice(1) : ""; }
 
 function retencionLabel(t){
-  if(t.autorretenedor) return '<span class="chip chip-good"><span class="chip-dot"></span>Sin retención (O-15/O-47)</span>';
-  if(t.concepto_retencion==="compras") return '<span class="chip chip-warn">Compras 2.5%</span>';
-  if(t.concepto_retencion==="arrendamientos") return '<span class="chip chip-warn">Arrendamientos 3.5%</span>';
-  if(CONCEPTO_LABELS[t.concepto_retencion]) return '<span class="chip">'+esc(CONCEPTO_LABELS[t.concepto_retencion])+' (sin retención)</span>';
-  return '<span class="small">—</span>';
+  var out = "";
+  if(t.autorretenedor) out = '<span class="chip chip-good"><span class="chip-dot"></span>Sin retención (O-15/O-47)</span>';
+  else if(t.concepto_retencion==="compras") out = '<span class="chip chip-warn">Compras 2.5%</span>';
+  else if(t.concepto_retencion==="arrendamientos") out = '<span class="chip chip-warn">Arrendamientos 3.5%</span>';
+  else if(CONCEPTO_LABELS[t.concepto_retencion]) out = '<span class="chip">'+esc(CONCEPTO_LABELS[t.concepto_retencion])+' (sin retención)</span>';
+  if(INGRESO_LABELS[t.concepto_ingreso]) out += ' <span class="chip chip-good">'+esc(INGRESO_LABELS[t.concepto_ingreso])+'</span>';
+  return out || '<span class="small">—</span>';
 }
 function ajustesRetencionHTML(){
   var c = S.config || {uvt:52374, tasa_compras:2.5, tasa_arrendamientos:3.5, base_minima:524000};
@@ -1982,11 +2001,21 @@ var CONCEPTOS_RETENCION = [
   ["servicios_publicos","Servicios públicos (sin retención)"],
   ["fletes","Fletes / transporte de carga (sin retención)"],
   ["seguros","Seguros (sin retención)"],
+  ["afiliaciones","Afiliaciones (sin retención)"],
+  ["publicidad","Publicidad (sin retención)"],
   ["diversos","Diversos (sin retención)"]
 ];
-var CONCEPTO_LABELS = {arrendamientos:"Arrendamiento", servicios_publicos:"Servicios públicos", fletes:"Fletes", seguros:"Seguros", diversos:"Diversos"};
-var CONCEPTO_DOC_KEYS = {arrendamientos:"Gasto Arriendo", servicios_publicos:"Gasto Servicios Públicos", fletes:"Gasto Fletes", seguros:"Gasto Seguros", diversos:"Gasto Diversos"};
-var CONCEPTOS_SIN_RETENCION = ["servicios_publicos","fletes","seguros","diversos"];
+var CONCEPTO_LABELS = {arrendamientos:"Arrendamiento", servicios_publicos:"Servicios públicos", fletes:"Fletes", seguros:"Seguros", afiliaciones:"Afiliaciones", publicidad:"Publicidad", diversos:"Diversos"};
+var CONCEPTO_DOC_KEYS = {arrendamientos:"Gasto Arriendo", servicios_publicos:"Gasto Servicios Públicos", fletes:"Gasto Fletes", seguros:"Gasto Seguros", afiliaciones:"Gasto Afiliaciones", publicidad:"Gasto Publicidad", diversos:"Gasto Diversos"};
+var CONCEPTOS_SIN_RETENCION = ["servicios_publicos","fletes","seguros","afiliaciones","publicidad","diversos"];
+
+var CONCEPTOS_INGRESO = [
+  ["","Venta normal"],
+  ["arriendo","Ingreso por Arriendo"],
+  ["semovientes","Venta de Semovientes"]
+];
+var INGRESO_LABELS = {arriendo:"Arriendo", semovientes:"Venta de Semovientes"};
+var INGRESO_DOC_KEYS = {arriendo:"Ingreso Arriendo", semovientes:"Venta de Semovientes"};
 var DIAN_DOC_TYPES = [
   ["11","Registro civil de nacimiento"],["12","Tarjeta de identidad"],["13","Cédula de ciudadanía"],
   ["14","Certificado Registraduría (sucesión ilíquida sin doc.)"],["15","Doc. sucesión ilíquida (notaría/juzgado)"],
@@ -2025,6 +2054,10 @@ function nuevoTerceroModal(){
       '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"'+(t.autorretenedor?" checked":"")+'> No se le practica retención (responsabilidad O-15 Autorretenedor u O-47 Régimen Simple)</label>' +
       '<label>Concepto de retención (si no es autorretenedor)</label>' +
       '<select id="t-concepto">'+CONCEPTOS_RETENCION.map(function(cr){return '<option value="'+cr[0]+'"'+selOpt(cr[0],t.concepto_retencion||"")+'>'+cr[1]+'</option>';}).join("")+'</select>' +
+    '</div>' +
+    '<div class="field" style="margin-top:8px">' +
+      '<label>Concepto de ingreso (si este tercero te paga algo distinto de una venta normal)</label>' +
+      '<select id="t-concepto-ingreso">'+CONCEPTOS_INGRESO.map(function(ci){return '<option value="'+ci[0]+'"'+selOpt(ci[0],t.concepto_ingreso||"")+'>'+ci[1]+'</option>';}).join("")+'</select>' +
     '</div>' +
   '</div><div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitTercero()">Guardar</button></div></div></div>';
 }
@@ -2119,6 +2152,7 @@ window.app = {
       regimen: document.getElementById("t-regimen").value,
       autorretenedor: document.getElementById("t-autorretenedor").checked,
       concepto_retencion: document.getElementById("t-concepto").value,
+      concepto_ingreso: document.getElementById("t-concepto-ingreso").value,
       direccion: document.getElementById("t-direccion").value.trim(),
       ciudad: document.getElementById("t-ciudad").value.trim(),
       departamento: document.getElementById("t-departamento").value.trim(),
