@@ -869,7 +869,7 @@ function slotDeCuenta(codigo){
   if(c4==="2368") return "reteIca";
   if(c4==="2408") return "iva";
   var c1 = codigo[0];
-  if(c1==="4"||c1==="5"||c1==="6") return "main";
+  if(c1==="4"||c1==="5"||c1==="6") return /590$/.test(codigo) ? "mainExenta" : "mainGravada";
   return "otro";
 }
 function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas){
@@ -903,17 +903,34 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     }
   }
 
+  function splitGravadaExenta(){
+    var baseGravada = iva>0 ? (iva/19*100) : 0;
+    var baseExenta = total - iva - baseGravada;
+    if(Math.abs(baseExenta)<1) baseExenta=0;
+    if(baseExenta<0) baseExenta=0;
+    return {gravada:baseGravada, exenta:baseExenta};
+  }
+
   var lineas=[];
   if(esVenta){
     var reten = reteIva+reteRenta+reteIca;
     lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
     if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
-    lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+    var baseV = splitGravadaExenta();
+    if(baseV.gravada>0) lineas.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% "+docRef, debito:0, credito: baseV.gravada});
+    if(baseV.exenta>0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida "+docRef, debito:0, credito: baseV.exenta});
+    if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
     if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
   } else {
-    var cuentaMain = (tMatch && tMatch.tipo==="proveedor") ? "1435" : "5195";
-    var nombreMain = cuentaMain==="1435" ? "Mercancías" : "Compra";
-    lineas.push({cuenta:cuentaMain, tercero:"", detalle:nombreMain+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+    var esMercancia = tMatch && tMatch.tipo==="proveedor";
+    if(esMercancia){
+      var baseC = splitGravadaExenta();
+      if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
+      if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
+      if(baseC.gravada<=0 && baseC.exenta<=0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+    } else {
+      lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+    }
     if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     var pagoProveedor = total-reteIva-reteRenta-reteIca;
     lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
@@ -1469,9 +1486,11 @@ function librosHTML(e){
 function comprobanteMensualHTML(per){
   var list = S.comprobantes.filter(function(c){return c.periodo===per;});
   if(!list.length) return '<div class="card card-pad"><p class="small">Sin comprobantes en '+periodoLabel(per)+'.</p></div>';
+  var DEVOL_LABELS = {FV:"Devolución en Ventas", FC:"Devolución en Compras"};
   var bloques={};
   list.forEach(function(c){
-    var key = c.tipo;
+    var esDevol = /^Nota Crédito/.test(c.descripcion||"") && DEVOL_LABELS[c.tipo];
+    var key = esDevol ? (c.tipo+"_NC") : c.tipo;
     if(!bloques[key]) bloques[key]={};
     (c.lineas||[]).forEach(function(l){
       if(!bloques[key][l.cuenta]) bloques[key][l.cuenta]={d:0,c:0};
@@ -1479,7 +1498,7 @@ function comprobanteMensualHTML(per){
       bloques[key][l.cuenta].c += Number(l.credito)||0;
     });
   });
-  var orden = ["FV","FC","RC","CE","NC","NM"];
+  var orden = ["FV","FV_NC","FC","FC_NC","RC","CE","NC","NM"];
   var claves = Object.keys(bloques).sort(function(a,b){
     var ia=orden.indexOf(a), ib=orden.indexOf(b);
     if(ia<0) ia=99; if(ib<0) ib=99;
@@ -1488,7 +1507,8 @@ function comprobanteMensualHTML(per){
   var totD=0, totC=0;
   var html = '<div class="card card-pad"><div class="section-title">Comprobante consolidado — '+periodoLabel(per)+'</div>';
   claves.forEach(function(k){
-    var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k;
+    var tipoBase = k.replace(/_NC$/,"");
+    var tipoLbl = /_NC$/.test(k) ? DEVOL_LABELS[tipoBase] : ((COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k);
     var codigos = Object.keys(bloques[k]).sort();
     var subD=0, subC=0;
     var filas = codigos.map(function(cod){
