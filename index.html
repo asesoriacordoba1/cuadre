@@ -297,6 +297,7 @@ var S = {
   libroSub:"consolidado",
   formSub:"iva300",
   tercFiltro:"",
+  compFiltro:"",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -927,6 +928,7 @@ function slotDeCuenta(codigo){
 function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
+  var esND = !esNC && /d[eé]bito/i.test(tipoDocRaw);
   var esVenta = nitMatches(row["NIT Emisor"], empresa.nit);
   var esCompra = !esVenta && nitMatches(row["NIT Receptor"], empresa.nit);
   if(!esVenta && !esCompra) return null;
@@ -1064,13 +1066,14 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   return {
     tipo: esVenta? "FV":"FC",
     fecha: fecha,
-    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")"+etiqueta,
+    descripcion: (esNC?"Nota Crédito - ":(esND?"Nota Débito - ":(esVenta?"Venta - ":"Compra - ")))+tercNombre+" ("+docRef+")"+etiqueta,
     lineas: lineas,
     cufe: cufe,
     tercNombre: tercNombre,
     total: total,
     esVenta: esVenta,
     esNC: esNC,
+    esND: esND,
     esPersonal: esPersonal,
     esConocidoPersonal: esConocidoPersonal,
     porReglas: porReglas,
@@ -1161,7 +1164,7 @@ async function confirmImport(){
 /* ---------- limpieza de compras ya importadas ---------- */
 function extractTercFromDescripcion(desc){
   var s = String(desc||"");
-  s = s.replace(/^(Compra|Venta|Nota Crédito) - /, "");
+  s = s.replace(/^(Compra|Venta|Nota Crédito|Nota Débito) - /, "");
   s = s.replace(/\s*\([^)]*\)\s*$/, "");
   s = s.replace(/\s*\[(personal|diverso)\]\s*$/, "");
   return s.trim();
@@ -1541,22 +1544,48 @@ function tercerosHTML(e){
   return body;
 }
 
+function categoriaComprobante(c){
+  var desc = c.descripcion||"";
+  if(/^Nota Crédito/.test(desc)) return "nc";
+  if(/^Nota Débito/.test(desc)) return "nd";
+  if(c.tipo==="NM") return "nomina";
+  if(c.tipo==="FV") return "fv";
+  if(c.tipo==="FC"){
+    var esMercancia = (c.lineas||[]).some(function(l){ return (l.cuenta||"").slice(0,2)==="14"; });
+    return esMercancia ? "fc" : "gastos";
+  }
+  return "otro";
+}
+var CATEGORIAS_COMPROBANTE = [
+  ["","Todos"],["fv","Factura de Venta"],["fc","Factura de Compra"],["gastos","Gastos"],
+  ["nomina","Nóminas"],["nc","Notas Crédito"],["nd","Notas Débito"],["otro","Otros"]
+];
 function comprobantesHTML(e){
   var per = S.periodo || todayPeriodo();
-  var list = S.comprobantes.filter(function(c){return c.periodo===per;}).slice().sort(function(a,b){return (a._id||"").localeCompare(b._id||"");});
+  var listPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
+  var conteos = {};
+  listPeriodo.forEach(function(c){ var k=categoriaComprobante(c); conteos[k]=(conteos[k]||0)+1; });
+  var filtroBtns = CATEGORIAS_COMPROBANTE.map(function(f){
+    var n = f[0]===""?listPeriodo.length:(conteos[f[0]]||0);
+    if(f[0]!=="" && f[0]!=="otro" && !n) return "";
+    return '<button class="'+(S.compFiltro===f[0]?"active":"")+'" onclick="app.setCompFiltro(\''+f[0]+'\')">'+f[1]+' ('+n+')</button>';
+  }).join("");
+  var list = (S.compFiltro ? listPeriodo.filter(function(c){return categoriaComprobante(c)===S.compFiltro;}) : listPeriodo)
+    .slice().sort(function(a,b){return (a._id||"").localeCompare(b._id||"");});
   var rows = list.map(function(c){
     var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
     return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
       '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
-  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay comprobantes en '+periodoLabel(per)+'.</td></tr>';
+  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay comprobantes'+(S.compFiltro?" de esta categoría":"")+' en '+periodoLabel(per)+'.</td></tr>';
   var tiposPresentes = {};
-  list.forEach(function(c){ tiposPresentes[c.tipo]=(tiposPresentes[c.tipo]||0)+1; });
+  listPeriodo.forEach(function(c){ tiposPresentes[c.tipo]=(tiposPresentes[c.tipo]||0)+1; });
   var bulkBtns = Object.keys(tiposPresentes).map(function(t){
     var lbl = (COMPROB_TIPOS.find(function(x){return x.k===t;})||{}).label||t;
     return '<button class="btn btn-outline btn-sm" style="color:var(--bad)" onclick="app.eliminarComprobantesPeriodoTipo(\''+per+'\',\''+t+'\')" '+((periodoCerrado(per)||S.bulkDeleteBusy)?"disabled":"")+'>Eliminar todos: '+esc(lbl)+' ('+tiposPresentes[t]+')</button>';
   }).join(" ");
   return topbarHTML() +
-  '<div class="toolbar"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div><button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div>' +
+  '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div>' +
+  '<div class="toolbar" style="margin-top:-10px"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div></div>' +
   (bulkBtns ? '<div class="toolbar" style="margin-top:-6px"><div class="small">Volver a importar el período (borra en bloque por tipo):</div><div class="btn-row">'+bulkBtns+'</div></div>' : "") +
   '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
@@ -2138,6 +2167,7 @@ window.app = {
   setLibroSub: function(t){ S.libroSub=t; render(); },
   setFormSub: function(t){ S.formSub=t; render(); },
   setTercFiltro: function(t){ S.tercFiltro=t; render(); },
+  setCompFiltro: function(t){ S.compFiltro=t; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
   backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
