@@ -616,6 +616,20 @@ async function eliminarComprobante(numero){
   if(!confirm("¿Eliminar el comprobante "+numero+"? Esta acción no se puede deshacer.")) return;
   await sb.from("comprobantes").delete().eq("empresa_id",S.empresaId).eq("numero",numero);
 }
+async function eliminarComprobantesPeriodoTipo(per, tipo){
+  if(periodoCerrado(per)){ alert("No puedes eliminar comprobantes de un periodo cerrado."); return; }
+  var lista = S.comprobantes.filter(function(c){return c.periodo===per && c.tipo===tipo;});
+  if(!lista.length) return;
+  var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===tipo;})||{}).label||tipo;
+  if(!confirm("¿Eliminar los "+lista.length+" comprobantes de \""+tipoLbl+"\" de "+periodoLabel(per)+"? Esta acción no se puede deshacer. Útil para volver a importar el período tras una corrección del sistema.")) return;
+  S.bulkDeleteBusy=true; render();
+  var numeros = lista.map(function(c){return c._id;});
+  for(var i=0;i<numeros.length;i+=100){
+    var batch = numeros.slice(i,i+100);
+    await sb.from("comprobantes").delete().eq("empresa_id",S.empresaId).in("numero",batch);
+  }
+  S.bulkDeleteBusy=false; render();
+}
 
 /* ---------- terceros ---------- */
 function nombreCompletoTercero(d){
@@ -1476,8 +1490,15 @@ function comprobantesHTML(e){
     return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
       '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay comprobantes en '+periodoLabel(per)+'.</td></tr>';
+  var tiposPresentes = {};
+  list.forEach(function(c){ tiposPresentes[c.tipo]=(tiposPresentes[c.tipo]||0)+1; });
+  var bulkBtns = Object.keys(tiposPresentes).map(function(t){
+    var lbl = (COMPROB_TIPOS.find(function(x){return x.k===t;})||{}).label||t;
+    return '<button class="btn btn-outline btn-sm" style="color:var(--bad)" onclick="app.eliminarComprobantesPeriodoTipo(\''+per+'\',\''+t+'\')" '+((periodoCerrado(per)||S.bulkDeleteBusy)?"disabled":"")+'>Eliminar todos: '+esc(lbl)+' ('+tiposPresentes[t]+')</button>';
+  }).join(" ");
   return topbarHTML() +
   '<div class="toolbar"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div><button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div>' +
+  (bulkBtns ? '<div class="toolbar" style="margin-top:-6px"><div class="small">Volver a importar el período (borra en bloque por tipo):</div><div class="btn-row">'+bulkBtns+'</div></div>' : "") +
   '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
@@ -2111,6 +2132,7 @@ window.app = {
     guardarComprobante({_id:draftId, tipo:draftTipo, fecha:draftFecha, periodo:draftPeriodo||draftFecha.slice(0,7), descripcion:draftDescripcion, lineas:draftLineas});
   },
   eliminarComprobante: eliminarComprobante,
+  eliminarComprobantesPeriodoTipo: eliminarComprobantesPeriodoTipo,
 
   cerrarPeriodo: function(p){
     var list=S.comprobantes.filter(function(c){return c.periodo===p;});
