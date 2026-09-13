@@ -369,8 +369,21 @@ function boot(){
     else if(!session && had){ teardownEmpresa(); S.empresas=[]; S.empresaId=null; clearMainChannels(); render(); }
   });
 }
+var CUENTAS_HARDCODED = [
+  {cuenta_codigo:"413501", cuenta_nombre:"VENTAS GRAVADAS 19%"},
+  {cuenta_codigo:"413590", cuenta_nombre:"VENTAS EXENTAS/EXCLUIDAS"},
+  {cuenta_codigo:"413518", cuenta_nombre:"VENTA DE ANIMALES VIVOS Y CUEROS"},
+  {cuenta_codigo:"424525", cuenta_nombre:"INGRESOS POR ARRENDAMIENTOS"},
+  {cuenta_codigo:"143501", cuenta_nombre:"MERCANCIA GRAVADA 19%"},
+  {cuenta_codigo:"143590", cuenta_nombre:"MERCANCIA EXENTA/EXCLUIDA"},
+  {cuenta_codigo:"513551", cuenta_nombre:"FLETES Y TRANSPORTE"},
+  {cuenta_codigo:"513540", cuenta_nombre:"SERVICIOS PUBLICOS"},
+  {cuenta_codigo:"421330", cuenta_nombre:"DESCUENTOS COMERCIALES CONDICIONADOS"},
+  {cuenta_codigo:"220501", cuenta_nombre:"PROVEEDORES NACIONALES"},
+  {cuenta_codigo:"613501", cuenta_nombre:"COSTO DE VENTA"}
+];
 function afterLogin(){
-  loadEmpresas();
+  loadEmpresas().then(function(){ sincronizarCuentasDesdeReglas(CUENTAS_HARDCODED); });
   subscribeEmpresasRealtime();
   loadConfig();
   var chCfg = sb.channel("config-rt").on("postgres_changes",{event:"*",schema:"public",table:"config"},debounce(function(){ loadConfig().then(render); })).subscribe();
@@ -1105,6 +1118,19 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
 }
+function rebuildVentaMain(r, concepto){
+  var total = r.total, iva = Number(r.iva)||0;
+  if(concepto==="semovientes") return [{cuenta:"413518", tercero:"", detalle:"Venta de animales vivos y cueros - "+r.tercNombre, debito:0, credito: total-iva}];
+  if(concepto==="arriendo") return [{cuenta:"424525", tercero:"", detalle:"Ingresos por arrendamientos - "+r.tercNombre, debito:0, credito: total-iva}];
+  var baseGravada = iva>0 ? (iva/19*100) : 0;
+  var baseExenta = total-iva-baseGravada;
+  if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
+  var out=[];
+  if(baseGravada>0) out.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% - "+r.tercNombre, debito:0, credito:baseGravada});
+  if(baseExenta>0) out.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida - "+r.tercNombre, debito:0, credito:baseExenta});
+  if(!out.length) out.push({cuenta:"4135", tercero:"", detalle:"Venta - "+r.tercNombre, debito:0, credito: total-iva});
+  return out;
+}
 function rebuildDevolucionCompra(r, conRetencion){
   var total = r.total, iva = Number(r.iva)||0;
   var baseGravada = iva>0 ? (iva/19*100) : 0;
@@ -1242,6 +1268,18 @@ function extractTercFromDescripcion(desc){
   s = s.replace(/\s*\([^)]*\)\s*$/, "");
   s = s.replace(/\s*\[(personal|diverso)\]\s*$/, "");
   return s.trim();
+}
+function normNombre(s){
+  return String(s||"").trim().toUpperCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/\s+/g," ");
+}
+function terceroPorNombre(nombre){
+  if(!nombre) return null;
+  var norm = normNombre(nombre);
+  if(!norm) return null;
+  return S.terceros.find(function(t){ return normNombre(t.nombre)===norm; }) ||
+    S.terceros.find(function(t){ return normNombre(t.nombre_comercial)===norm; });
 }
 function analizarCompras(){
   var map = {};
@@ -1595,8 +1633,9 @@ function ajustesRetencionHTML(){
 function terceroFiltrados(){
   var listaFiltrada = S.tercFiltro ? S.terceros.filter(function(t){return (t.tipo||"otro")===S.tercFiltro;}) : S.terceros;
   var q = (S.tercBuscar||"").trim().toLowerCase();
+  var qd = normDigits(q);
   if(q) listaFiltrada = listaFiltrada.filter(function(t){
-    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || (t.nombre_comercial||"").toLowerCase().indexOf(q)>=0 || normDigits(t.identificacion||"").indexOf(normDigits(q))>=0;
+    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || (t.nombre_comercial||"").toLowerCase().indexOf(q)>=0 || (qd && normDigits(t.identificacion||"").indexOf(qd)>=0);
   });
   return listaFiltrada;
 }
@@ -1962,7 +2001,7 @@ function formulario350HTML(per){
   list.forEach(function(c){
     var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
     var nombre = extractTercFromDescripcion(c.descripcion);
-    var tMatch = S.terceros.find(function(t){ return nombreCompletoTercero(t)===nombre; });
+    var tMatch = terceroPorNombre(nombre);
     var lineaRet = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2365"; });
     var lineaReteIva = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2367"; });
     if(lineaReteIva) reteIvaTotal += (Number(lineaReteIva.credito)||0) - (Number(lineaReteIva.debito)||0);
@@ -2159,11 +2198,26 @@ function importarHTML(e){
         if(estado) links.push('<a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>');
         ncToggle = chip + links.join(' · ');
       }
+      var ventaToggle = "";
+      if(r.esVenta && !r.esNC && !r.dup){
+        var vEstado = r.esIngresoConcepto;
+        if(vEstado===undefined){
+          var vMainLinea = (r.lineas||[]).find(function(l){ return (l.cuenta||"")[0]==="4"; });
+          vEstado = (vMainLinea && vMainLinea.cuenta==="424525") ? "arriendo" : (vMainLinea && vMainLinea.cuenta==="413518") ? "semovientes" : "";
+        }
+        var vChipTxt = {arriendo:"Ingreso por Arriendo", semovientes:"Venta de Semovientes"}[vEstado];
+        var vChip = vChipTxt ? '<span class="chip chip-good" style="margin-left:4px">'+vChipTxt+'</span> ' : "";
+        var vLinks = [];
+        if(vEstado!=="arriendo") vLinks.push('<a class="link" onclick="app.marcarIngresoVenta('+i+',\'arriendo\')">Es arriendo</a>');
+        if(vEstado!=="semovientes") vLinks.push('<a class="link" onclick="app.marcarIngresoVenta('+i+',\'semovientes\')">Es semovientes</a>');
+        if(vEstado) vLinks.push('<a class="link" onclick="app.resetIngresoVenta('+i+')">venta normal</a>');
+        ventaToggle = vChip + vLinks.join(' · ');
+      }
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
         '<td>'+fmtDate(r.fecha)+'</td>' +
         '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
-        '<td>'+esc(r.tercNombre)+ncToggle+'</td>' +
+        '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+'</td>' +
         '<td class="num">'+fmtCOP(r.total)+'</td>' +
         '<td>'+flags+'</td>' +
       '</tr>';
@@ -2310,11 +2364,7 @@ function nuevoComprobanteModal(){
   var tercOpts = '<option value="">—</option>'+S.terceros.map(function(t){return '<option value="'+t.id+'">'+esc(t.nombre)+'</option>';}).join("");
   var tot = totalsOf(draftLineas);
   var diff = tot.d-tot.c;
-  var terceroDetectado = null;
-  if(draftDescripcion){
-    var nombreDetectado = extractTercFromDescripcion(draftDescripcion);
-    if(nombreDetectado) terceroDetectado = S.terceros.find(function(t){ return t.nombre===nombreDetectado; });
-  }
+  var terceroDetectado = draftDescripcion ? terceroPorNombre(extractTercFromDescripcion(draftDescripcion)) : null;
   var terceroDetectadoHTML = terceroDetectado ?
     ('<p class="small" style="margin:-4px 0 10px">Tercero: <b>'+esc(terceroDetectado.nombre)+'</b> · <a class="link" onclick="app.editarTerceroPorId(\''+terceroDetectado.id+'\')">Editar tercero</a></p>') : "";
   var lineRows = draftLineas.map(function(l,i){
@@ -2546,6 +2596,20 @@ window.app = {
     var tot = totalsOf(r.lineas);
     r.debeCuadra = Math.abs(tot.d-tot.c)<1;
     render();
+  },
+  marcarIngresoVenta: function(i, concepto){
+    var r = S.importRows && S.importRows[i];
+    if(!r || !r.esVenta) return;
+    if(!r._lineasOriginal) r._lineasOriginal = r.lineas;
+    var resto = r._lineasOriginal.filter(function(l){ return (l.cuenta||"")[0]!=="4"; });
+    r.lineas = resto.concat(rebuildVentaMain(r, concepto));
+    r.esIngresoConcepto = concepto;
+    var tot = totalsOf(r.lineas);
+    r.debeCuadra = Math.abs(tot.d-tot.c)<1;
+    render();
+  },
+  resetIngresoVenta: function(i){
+    this.marcarIngresoVenta(i, "");
   },
   confirmImport: confirmImport,
 
