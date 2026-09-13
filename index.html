@@ -782,7 +782,7 @@ function handleTercerosImportFile(file){
       var wb = XLSX.read(data, {type:"array"});
       var ws = wb.Sheets[wb.SheetNames[0]];
       var json = XLSX.utils.sheet_to_json(ws, {defval:""});
-      var existing = {}; S.terceros.forEach(function(t){ if(t.identificacion) existing[normDigits(t.identificacion)]=true; });
+      var existing = {}; S.terceros.forEach(function(t){ if(t.identificacion) existing[normNit(t.identificacion)]=true; });
       var rows = [];
       json.forEach(function(row){
         var razon = String(row["Razón social informado"]||"").trim();
@@ -805,7 +805,7 @@ function handleTercerosImportFile(file){
         var concIng = String(row["Concepto ingreso (arriendo/semovientes)"]||"").trim().toLowerCase()
           .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
         if(CONCEPTOS_INGRESO.map(function(ci){return ci[0];}).indexOf(concIng)<0) concIng="";
-        var dup = !!(ident && existing[normDigits(ident)]);
+        var dup = !!(ident && existing[normNit(ident)]);
         rows.push({nombre:nombre, es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2,
           tipo_documento:tipoDoc, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc, concepto_ingreso:concIng,
           direccion:String(row["Dirección"]||"").trim(), ciudad:String(row["municipio"]||"").trim(),
@@ -961,8 +961,9 @@ async function confirmReglasImport(){
 
 /* ---------- importador DIAN ---------- */
 function normDigits(s){ return String(s||"").replace(/\D/g,""); }
+function normNit(s){ return normDigits(s).replace(/^0+/,""); }
 function nitMatches(a,b){
-  var x=normDigits(a), y=normDigits(b);
+  var x=normNit(a), y=normNit(b);
   if(!x||!y) return false;
   if(x===y) return true;
   if(Math.abs(x.length-y.length)===1){
@@ -1186,7 +1187,7 @@ function rebuildDevolucionCompra(r, conRetencion){
   if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"(NC) IVA descontable", debito:0, credito:iva});
   var retAjuste = 0;
   if(conRetencion){
-    var tMatch = S.terceros.find(function(t){ return t.identificacion && normDigits(t.identificacion)===normDigits(r.tercIdent||""); });
+    var tMatch = S.terceros.find(function(t){ return t.identificacion && normNit(t.identificacion)===normNit(r.tercIdent||""); });
     if(!tMatch || (tMatch.concepto_retencion!=="compras" && tMatch.concepto_retencion!=="arrendamientos")){
       alert("Este proveedor no tiene configurado un Concepto de retención (compras/arrendamientos) en Terceros, así que no puedo calcular el ajuste. Configúralo primero si este proveedor sí tiene retención.");
       return null;
@@ -1247,7 +1248,7 @@ async function confirmImport(){
   var nuevosMap = {};
   rows.forEach(function(r){
     if(r.tercConocido || !r.tercIdent) return;
-    var key = normDigits(r.tercIdent);
+    var key = normNit(r.tercIdent);
     if(!key || nuevosMap[key]) return;
     nuevosMap[key] = {empresa_id:S.empresaId, nombre:r.tercNombre, identificacion:r.tercIdent, tipo:(r.esVenta?"cliente":"otro"),
       es_juridica:true, razon_social:r.tercNombre, tipo_documento:"31", pais:"Colombia"};
