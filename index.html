@@ -677,7 +677,7 @@ async function guardarTercero(d){
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
     tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
     primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
-    primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||""
+    primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||"", nombre_comercial:d.nombre_comercial||""
   });
   if(res.error){ alert("No se pudo guardar el tercero: "+res.error.message); return; }
   closeModal();
@@ -690,7 +690,7 @@ async function actualizarTercero(id, d){
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
     tipo_documento:d.tipo_documento||"31", es_juridica:!!d.es_juridica,
     primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
-    primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||""
+    primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||"", nombre_comercial:d.nombre_comercial||""
   }).eq("id", id);
   if(res.error){ alert("No se pudo actualizar el tercero: "+res.error.message); return; }
   editingTerceroId = null;
@@ -1534,11 +1534,12 @@ function tercerosHTML(e){
   var listaFiltrada = S.tercFiltro ? S.terceros.filter(function(t){return (t.tipo||"otro")===S.tercFiltro;}) : S.terceros;
   var q = (S.tercBuscar||"").trim().toLowerCase();
   if(q) listaFiltrada = listaFiltrada.filter(function(t){
-    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || normDigits(t.identificacion||"").indexOf(normDigits(q))>=0;
+    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || (t.nombre_comercial||"").toLowerCase().indexOf(q)>=0 || normDigits(t.identificacion||"").indexOf(normDigits(q))>=0;
   });
   var rows = listaFiltrada.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
-    return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
+    var nombreCell = esc(t.nombre) + (t.nombre_comercial ? '<br><span class="small">'+esc(t.nombre_comercial)+'</span>' : "");
+    return '<tr><td>'+nombreCell+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros que coincidan.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
@@ -2140,6 +2141,7 @@ function nuevoTerceroModal(){
       '<div class="radio-opt'+(!pendingEsJuridica?" sel":"")+'" onclick="app.setEsJuridica(false)">Persona natural</div>' +
     '</div>' +
     nombreFields +
+    '<div class="field"><label>Nombre comercial (opcional)</label><input id="t-nombre-comercial" value="'+esc(t.nombre_comercial||"")+'" placeholder="Si opera con un nombre distinto al legal"></div>' +
     '<div class="field-row"><div class="field"><label>Tipo de documento</label><select id="t-tipodoc">'+docOpts+'</select></div>' +
     '<div class="field"><label>Número identificación</label><input id="t-ident" value="'+esc(t.identificacion||"")+'" placeholder="C.C. / NIT"></div></div>' +
     '<div class="field-row"><div class="field"><label>Tipo (en Cuadre)</label><select id="t-tipo">'+tipoOpts+'</select></div>' +
@@ -2247,6 +2249,7 @@ window.app = {
       segundo_apellido: pendingEsJuridica ? "" : document.getElementById("t-ap2").value.trim(),
       primer_nombre: pendingEsJuridica ? "" : document.getElementById("t-nom1").value.trim(),
       otros_nombres: pendingEsJuridica ? "" : document.getElementById("t-nom2").value.trim(),
+      nombre_comercial: document.getElementById("t-nombre-comercial").value.trim(),
       tipo_documento: document.getElementById("t-tipodoc").value,
       identificacion: document.getElementById("t-ident").value.trim(),
       tipo: document.getElementById("t-tipo").value,
