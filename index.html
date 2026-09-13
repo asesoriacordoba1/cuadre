@@ -914,8 +914,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   function splitGravadaExenta(){
     var baseGravada = iva>0 ? (iva/19*100) : 0;
     var baseExenta = total - iva - baseGravada;
-    if(Math.abs(baseExenta)<1) baseExenta=0;
-    if(baseExenta<0) baseExenta=0;
+    if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
+    else if(Math.abs(baseExenta)<1) baseExenta=0;
     return {gravada:baseGravada, exenta:baseExenta};
   }
 
@@ -1563,8 +1563,8 @@ function splitVentaCompra(c){
   });
   var gravada = iva>0 ? (iva/19*100) : 0;
   var exenta = main - gravada;
-  if(Math.abs(exenta)<1) exenta=0;
-  if(exenta<0) exenta=0;
+  if(exenta<0){ gravada = main; exenta = 0; }
+  else if(Math.abs(exenta)<1) exenta=0;
   return {iva:iva, gravada:gravada, exenta:exenta};
 }
 function formulario300HTML(per){
