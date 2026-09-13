@@ -1001,7 +1001,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   return {
     tipo: esVenta? "FV":"FC",
     fecha: fecha,
-    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")"+(esPersonal?" [personal]":""),
+    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")"+(esPersonal?" [diverso]":""),
     lineas: lineas,
     cufe: cufe,
     tercNombre: tercNombre,
@@ -1099,7 +1099,7 @@ function extractTercFromDescripcion(desc){
   var s = String(desc||"");
   s = s.replace(/^(Compra|Venta|Nota Crédito) - /, "");
   s = s.replace(/\s*\([^)]*\)\s*$/, "");
-  s = s.replace(/\s*\[personal\]\s*$/, "");
+  s = s.replace(/\s*\[(personal|diverso)\]\s*$/, "");
   return s.trim();
 }
 function analizarCompras(){
@@ -1575,7 +1575,7 @@ function formulario300HTML(per){
   var cN={gravada:0,exenta:0,iva:0}, cD={gravada:0,exenta:0,iva:0};
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"");
-    var esPersonal = /\[personal\]/.test(c.descripcion||"");
+    var esPersonal = /\[(personal|diverso)\]/.test(c.descripcion||"");
     if(c.tipo==="FV"){
       var s = splitVentaCompra(c);
       var b = esDevol?vD:vN;
@@ -1607,7 +1607,7 @@ function formulario300HTML(per){
     var gen=0, desc=0;
     listaMes.forEach(function(c){
       var devol=/^Nota Crédito/.test(c.descripcion||"");
-      var esPersonal=/\[personal\]/.test(c.descripcion||"");
+      var esPersonal=/\[(personal|diverso)\]/.test(c.descripcion||"");
       var s = (c.tipo==="FV"||c.tipo==="FC") ? splitVentaCompra(c) : null;
       if(!s) return;
       if(c.tipo==="FV") gen += devol ? -s.iva : s.iva;
@@ -1629,7 +1629,7 @@ function formulario300HTML(per){
       filaFormHTML(43,"Total ingresos netos recibidos durante el período",c43) +
       filaFormHTML(67,"Total impuesto generado por operaciones gravadas",c67) +
     '</tbody></table></div>' +
-    '<div class="small" style="font-weight:600;margin:16px 0 6px">COMPRAS (mercancía — excluye compras personales)</div>' +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">COMPRAS (mercancía — excluye compras marcadas como Diverso, sin clasificar)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
       filaFormHTML(51,"De bienes gravados a la tarifa general (nacionales)",c51) +
       filaFormHTML(54,"De bienes y servicios excluidos, exentos y no gravados",c54) +
@@ -1827,7 +1827,7 @@ function periodosHTML(e){
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
-    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor no esté registrado como <a class="link" onclick="app.setTab(\'terceros\')">proveedor en Terceros</a> se marcan como <b>Personal</b> y se importan igual en la cuenta genérica (5195) para que las revises después en Comprobantes — reclasifícalas o elimínalas ahí si no son del negocio.</p>' +
+    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor no esté registrado como <a class="link" onclick="app.setTab(\'terceros\')">proveedor en Terceros</a> se marcan como <b>Diverso</b> (no significa que sea gasto personal, solo que aún no está clasificado) y se importan igual en la cuenta genérica (5195) para que las revises después en Comprobantes — registra el tercero y reclasifícalas, o elimínalas ahí si de verdad no son del negocio.</p>' +
     '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
@@ -1839,7 +1839,7 @@ function importarHTML(e){
       var flags = "";
       if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
       else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
-      else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Personal</span>';
+      else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Diverso</span>';
       else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
@@ -1858,7 +1858,7 @@ function importarHTML(e){
 
   body += '<div class="card card-pad" style="margin-top:18px">' +
     '<div class="section-title">2. Limpiar compras ya importadas</div>' +
-    '<p class="small" style="margin-bottom:12px">Agrupa las compras que ya están guardadas por proveedor, para que revises cuáles son gastos personales y las elimines en bloque.</p>' +
+    '<p class="small" style="margin-bottom:12px">Agrupa las compras que ya están guardadas por proveedor, para que revises cuáles no son del negocio y las elimines en bloque.</p>' +
     '<button class="btn btn-outline btn-sm" onclick="app.analizarCompras()">Analizar compras guardadas</button>';
   if(S.cleanupGroups){
     if(!S.cleanupGroups.length){
