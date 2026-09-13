@@ -1821,22 +1821,42 @@ function formulariosHTML(e){
 function comprobanteMensualHTML(per){
   var list = S.comprobantes.filter(function(c){return c.periodo===per;});
   if(!list.length) return '<div class="card card-pad"><p class="small">Sin comprobantes en '+periodoLabel(per)+'.</p></div>';
-  var DEVOL_LABELS = {FV:"Devolución en Ventas", FC:"Devolución en Compras"};
   var SPLIT_CODES = { FV:{gravada:"413501", exenta:"413590"}, FC:{gravada:"143501", exenta:"143590"} };
+  var BLOQUE_LABELS = {
+    FV:"Ventas", FV_NC:"Devoluciones en Ventas", FV_ARR:"Ingresos por Arrendamiento", FV_SEMOV:"Venta de Semovientes",
+    FC:"Compras", FC_NC:"Devoluciones en Compras", FC_GASTO:"Gastos",
+    DC:"Descuentos Comerciales Condicionados", CV:"Costo de Venta"
+  };
   var bloques={};
   var agg={};
   list.forEach(function(c){
-    var esDevol = /^Nota Crédito/.test(c.descripcion||"") && DEVOL_LABELS[c.tipo];
-    var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
-    var key = esDC ? "DC" : (esDevol ? (c.tipo+"_NC") : c.tipo);
+    var desc = c.descripcion||"";
+    var esDevol = /^Nota Crédito/.test(desc);
+    var esDC = /^Descuento Condicionado/.test(desc);
+    var key;
+    if(esDC) key="DC";
+    else if(c.tipo==="FV"){
+      if(esDevol) key="FV_NC";
+      else{
+        var esArriendo = (c.lineas||[]).some(function(l){return l.cuenta==="424525";});
+        var esSemov = (c.lineas||[]).some(function(l){return l.cuenta==="413518";});
+        key = esArriendo?"FV_ARR":(esSemov?"FV_SEMOV":"FV");
+      }
+    } else if(c.tipo==="FC"){
+      if(esDevol) key="FC_NC";
+      else{
+        var esMercancia = (c.lineas||[]).some(function(l){return (l.cuenta||"").slice(0,2)==="14";});
+        key = esMercancia?"FC":"FC_GASTO";
+      }
+    } else key = c.tipo;
     if(!bloques[key]) bloques[key]={};
-    var sc = (esDC || esDevol) ? null : SPLIT_CODES[c.tipo];
+    var sc = SPLIT_CODES[key];
     var ivaDoc = 0, tieneMain = false;
     (c.lineas||[]).forEach(function(l){
       var cuenta = l.cuenta||"";
       if(cuenta.slice(0,4)==="2408") ivaDoc += (Number(l.debito)||0)+(Number(l.credito)||0);
       if(sc){
-        var esMain = c.tipo==="FV" ? cuenta[0]==="4" : cuenta.slice(0,2)==="14";
+        var esMain = key==="FV" ? cuenta[0]==="4" : cuenta.slice(0,2)==="14";
         if(esMain){ tieneMain = true; return; }
       }
       if(!bloques[key][cuenta]) bloques[key][cuenta]={d:0,c:0};
@@ -1845,26 +1865,24 @@ function comprobanteMensualHTML(per){
     });
     if(sc && tieneMain){
       if(!agg[key]) agg[key]={iva:0, main:0};
-      var total = c.tipo==="FV" ? (Number(c.total_debito)||0) : (Number(c.total_credito)||0);
+      var total = key==="FV" ? (Number(c.total_debito)||0) : (Number(c.total_credito)||0);
       agg[key].iva += ivaDoc;
       agg[key].main += (total - ivaDoc);
     }
   });
   Object.keys(agg).forEach(function(key){
-    var tipoBase = key.replace(/_NC$/,"");
-    var sc = SPLIT_CODES[tipoBase];
+    var sc = SPLIT_CODES[key];
     var a = agg[key];
     if(a.main===0) return;
     var gravada = a.iva>0 ? (a.iva/19*100) : 0;
     var exenta = a.main - gravada;
-    var isDevolKey = /_NC$/.test(key);
-    var lado = tipoBase==="FV" ? (isDevolKey?"d":"c") : (isDevolKey?"c":"d");
+    var lado = key==="FV" ? "c" : "d";
     if(!bloques[key][sc.gravada]) bloques[key][sc.gravada]={d:0,c:0};
     if(!bloques[key][sc.exenta]) bloques[key][sc.exenta]={d:0,c:0};
     bloques[key][sc.gravada][lado] += gravada;
     bloques[key][sc.exenta][lado] += exenta;
   });
-  var orden = ["FV","FV_NC","FC","FC_NC","DC","CV","RC","CE","NC","NM"];
+  var orden = ["FV","FV_NC","FC","FC_NC","DC","CV","FC_GASTO","FV_ARR","FV_SEMOV","RC","CE","NC","NM"];
   var claves = Object.keys(bloques).sort(function(a,b){
     var ia=orden.indexOf(a), ib=orden.indexOf(b);
     if(ia<0) ia=99; if(ib<0) ib=99;
@@ -1873,8 +1891,7 @@ function comprobanteMensualHTML(per){
   var totD=0, totC=0;
   var html = '<div class="card card-pad"><div class="section-title">Comprobante consolidado — '+periodoLabel(per)+'</div>';
   claves.forEach(function(k){
-    var tipoBase = k.replace(/_NC$/,"");
-    var tipoLbl = k==="DC" ? "Descuentos Comerciales Condicionados" : (/_NC$/.test(k) ? DEVOL_LABELS[tipoBase] : ((COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k));
+    var tipoLbl = BLOQUE_LABELS[k] || (COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k;
     var codigos = Object.keys(bloques[k]).sort();
     var subD=0, subC=0;
     var filas = codigos.map(function(cod){
