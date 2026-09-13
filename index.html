@@ -295,6 +295,7 @@ var S = {
   tab:"dashboard",
   libroSub:"consolidado",
   formSub:"iva300",
+  tercFiltro:"",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -1449,13 +1450,21 @@ function ajustesRetencionHTML(){
   '</div>';
 }
 function tercerosHTML(e){
-  var rows = S.terceros.map(function(t){
+  var conteos = {};
+  S.terceros.forEach(function(t){ var k=t.tipo||"otro"; conteos[k]=(conteos[k]||0)+1; });
+  var TIPO_LABELS = {proveedor:"Proveedores", cliente:"Clientes", empleado:"Empleados", personal:"Personal", otro:"Otros"};
+  var filtroBtns = [["","Todos",S.terceros.length]].concat(TIPOS_VALIDOS.map(function(v){return [v,TIPO_LABELS[v]||cap(v),conteos[v]||0];}))
+    .map(function(f){
+      return '<button class="'+(S.tercFiltro===f[0]?"active":"")+'" onclick="app.setTercFiltro(\''+f[0]+'\')">'+f[1]+' ('+f[2]+')</button>';
+    }).join("");
+  var listaFiltrada = S.tercFiltro ? S.terceros.filter(function(t){return (t.tipo||"otro")===S.tercFiltro;}) : S.terceros;
+  var rows = listaFiltrada.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
     return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
-  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros registrados.</td></tr>';
+  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros'+(S.tercFiltro?" de este tipo":" registrados")+'.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
-  '<div class="toolbar"><div class="small">'+S.terceros.length+' terceros</div><div class="btn-row">' +
+  '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row">' +
     '<button class="btn btn-outline btn-sm" onclick="app.descargarPlantillaTerceros()">Descargar plantilla</button>' +
     '<label class="btn btn-outline btn-sm" style="margin-bottom:0"><input type="file" accept=".xlsx,.xls" style="display:none" onchange="app.onTercerosImportFile(this.files[0])">Importar terceros</label>' +
     '<button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button>' +
@@ -2051,6 +2060,7 @@ window.app = {
   setTab: function(t){ S.tab=t; render(); },
   setLibroSub: function(t){ S.libroSub=t; render(); },
   setFormSub: function(t){ S.formSub=t; render(); },
+  setTercFiltro: function(t){ S.tercFiltro=t; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
   backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
