@@ -716,6 +716,19 @@ function descargarPlantillaTerceros(){
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
   XLSX.writeFile(wb, "plantilla_terceros.xlsx");
 }
+var EXPORT_TERC_HEADERS = ["Nombre","Nombre comercial","Identificación","Tipo doc.","Tipo (Cuadre)","Régimen","Sin retención","Concepto retención","Concepto ingreso","Dirección","Municipio","Departamento","País"];
+function exportarTerceros(lista){
+  var data = [EXPORT_TERC_HEADERS].concat(lista.map(function(t){
+    return [t.nombre||"", t.nombre_comercial||"", t.identificacion||"", t.tipo_documento||"", t.tipo||"", t.regimen||"",
+      t.autorretenedor?"SI":"NO", CONCEPTO_LABELS[t.concepto_retencion]||t.concepto_retencion||"", INGRESO_LABELS[t.concepto_ingreso]||t.concepto_ingreso||"",
+      t.direccion||"", t.ciudad||"", t.departamento||"", t.pais||""];
+  }));
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = EXPORT_TERC_HEADERS.map(function(){return {wch:20};});
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Terceros");
+  XLSX.writeFile(wb, "terceros_"+(currentEmpresa()?currentEmpresa().nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+".xlsx");
+}
 var TIPOS_VALIDOS = ["cliente","proveedor","empleado","personal","otro"];
 function handleTercerosImportFile(file){
   S.tercImportErr=""; S.tercImportRows=null; render();
@@ -1523,6 +1536,14 @@ function ajustesRetencionHTML(){
     '<p class="small" style="margin-top:8px">Se usan al importar de la DIAN para calcular la retención de compras y arrendamientos, salvo que el tercero sea autorretenedor.</p>' +
   '</div>';
 }
+function terceroFiltrados(){
+  var listaFiltrada = S.tercFiltro ? S.terceros.filter(function(t){return (t.tipo||"otro")===S.tercFiltro;}) : S.terceros;
+  var q = (S.tercBuscar||"").trim().toLowerCase();
+  if(q) listaFiltrada = listaFiltrada.filter(function(t){
+    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || (t.nombre_comercial||"").toLowerCase().indexOf(q)>=0 || normDigits(t.identificacion||"").indexOf(normDigits(q))>=0;
+  });
+  return listaFiltrada;
+}
 function tercerosHTML(e){
   var conteos = {};
   S.terceros.forEach(function(t){ var k=t.tipo||"otro"; conteos[k]=(conteos[k]||0)+1; });
@@ -1531,11 +1552,7 @@ function tercerosHTML(e){
     .map(function(f){
       return '<button class="'+(S.tercFiltro===f[0]?"active":"")+'" onclick="app.setTercFiltro(\''+f[0]+'\')">'+f[1]+' ('+f[2]+')</button>';
     }).join("");
-  var listaFiltrada = S.tercFiltro ? S.terceros.filter(function(t){return (t.tipo||"otro")===S.tercFiltro;}) : S.terceros;
-  var q = (S.tercBuscar||"").trim().toLowerCase();
-  if(q) listaFiltrada = listaFiltrada.filter(function(t){
-    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || (t.nombre_comercial||"").toLowerCase().indexOf(q)>=0 || normDigits(t.identificacion||"").indexOf(normDigits(q))>=0;
-  });
+  var listaFiltrada = terceroFiltrados();
   var rows = listaFiltrada.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
     var nombreCell = esc(t.nombre) + (t.nombre_comercial ? '<br><span class="small">'+esc(t.nombre_comercial)+'</span>' : "");
@@ -1545,6 +1562,7 @@ function tercerosHTML(e){
   ajustesRetencionHTML() +
   '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row">' +
     '<div class="search-box"><input id="terc-buscar" value="'+esc(S.tercBuscar||"")+'" oninput="app.setTercBuscar(this.value)" placeholder="Buscar por nombre o identificación..."></div>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.exportarTerceros()">Exportar Excel ('+listaFiltrada.length+')</button>' +
     '<button class="btn btn-outline btn-sm" onclick="app.descargarPlantillaTerceros()">Descargar plantilla</button>' +
     '<label class="btn btn-outline btn-sm" style="margin-bottom:0"><input type="file" accept=".xlsx,.xls" style="display:none" onchange="app.onTercerosImportFile(this.files[0])">Importar terceros</label>' +
     '<button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button>' +
@@ -1587,21 +1605,56 @@ var CATEGORIAS_COMPROBANTE = [
   ["","Todos"],["fv","Factura de Venta"],["fc","Factura de Compra"],["gastos","Gastos"],
   ["nomina","Nóminas"],["nc","Notas Crédito"],["nd","Notas Débito"],["otro","Otros"]
 ];
+function comprobantesFiltrados(){
+  var q = (S.compBuscar||"").trim().toLowerCase();
+  if(q){
+    return S.comprobantes.filter(function(c){
+      return (c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0;
+    }).sort(function(a,b){ return (b.periodo+b._id).localeCompare(a.periodo+a._id); });
+  }
+  var per = S.periodo || todayPeriodo();
+  var listPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
+  return (S.compFiltro ? listPeriodo.filter(function(c){return categoriaComprobante(c)===S.compFiltro;}) : listPeriodo)
+    .slice().sort(function(a,b){return (a._id||"").localeCompare(b._id||"");});
+}
+function exportarComprobantes(lista){
+  if(!lista.length){ alert("No hay comprobantes para exportar."); return; }
+  var headHeaders = ["Número","Período","Fecha","Tipo","Descripción","Total débito","Total crédito","CUFE"];
+  var headData = [headHeaders].concat(lista.map(function(c){
+    var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
+    return [c._id, periodoLabel(c.periodo), c.fecha, tipoLbl, c.descripcion||"", c.total_debito||0, c.total_credito||0, c.cufe||""];
+  }));
+  var detHeaders = ["Número comprobante","Cuenta","Nombre cuenta","Detalle","Débito","Crédito"];
+  var detData = [detHeaders];
+  lista.forEach(function(c){
+    (c.lineas||[]).forEach(function(l){
+      var ac = cuentaByCodigo(l.cuenta);
+      detData.push([c._id, l.cuenta, ac?ac.nombre:"", l.detalle||"", l.debito||0, l.credito||0]);
+    });
+  });
+  var wsHead = XLSX.utils.aoa_to_sheet(headData);
+  wsHead["!cols"] = headHeaders.map(function(){return {wch:20};});
+  var wsDet = XLSX.utils.aoa_to_sheet(detData);
+  wsDet["!cols"] = detHeaders.map(function(){return {wch:22};});
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsHead, "Comprobantes");
+  XLSX.utils.book_append_sheet(wb, wsDet, "Detalle");
+  XLSX.writeFile(wb, "comprobantes_"+(currentEmpresa()?currentEmpresa().nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+".xlsx");
+}
 function comprobantesHTML(e){
   var per = S.periodo || todayPeriodo();
   var q = (S.compBuscar||"").trim().toLowerCase();
   if(q){
-    var found = S.comprobantes.filter(function(c){
-      return (c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0;
-    }).sort(function(a,b){ return (b.periodo+b._id).localeCompare(a.periodo+a._id); });
+    var found = comprobantesFiltrados();
     var rowsQ = found.map(function(c){
       var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
       return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
         '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
     }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados para "'+esc(S.compBuscar)+'".</td></tr>';
     return topbarHTML() +
-    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' +
-      '<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button></div>' +
+    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div><div class="btn-row">' +
+      '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+found.length+')</button>' +
+      '<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button></div></div>' +
     '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos.</div>' +
     '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rowsQ+'</tbody></table></div>';
   }
@@ -1628,6 +1681,7 @@ function comprobantesHTML(e){
   }).join(" ");
   return topbarHTML() +
   '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row"><div class="search-box"><input id="comp-buscar" value="" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' +
+  '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+list.length+')</button>' +
   '<button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div></div>' +
   '<div class="toolbar" style="margin-top:-10px"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div></div>' +
   (bulkBtns ? '<div class="toolbar" style="margin-top:-6px"><div class="small">Volver a importar el período (borra en bloque por tipo):</div><div class="btn-row">'+bulkBtns+'</div></div>' : "") +
@@ -2268,6 +2322,7 @@ window.app = {
   },
   eliminarTercero: eliminarTercero,
   descargarPlantillaTerceros: descargarPlantillaTerceros,
+  exportarTerceros: function(){ exportarTerceros(terceroFiltrados()); },
   onTercerosImportFile: function(file){ if(!file) return; handleTercerosImportFile(file); },
   toggleTercImportRow: function(i,val){ S.tercImportRows[i].include=val; render(); },
   confirmTercImport: confirmTercImport,
@@ -2332,6 +2387,7 @@ window.app = {
   eliminarComprobante: eliminarComprobante,
   eliminarComprobantesPeriodoTipo: eliminarComprobantesPeriodoTipo,
   generarCostoVenta: generarCostoVenta,
+  exportarComprobantes: function(){ exportarComprobantes(comprobantesFiltrados()); },
 
   cerrarPeriodo: function(p){
     var list=S.comprobantes.filter(function(c){return c.periodo===p;});
