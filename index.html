@@ -667,7 +667,7 @@ function descargarPlantillaTerceros(){
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
   XLSX.writeFile(wb, "plantilla_terceros.xlsx");
 }
-var TIPOS_VALIDOS = ["cliente","proveedor","empleado","otro"];
+var TIPOS_VALIDOS = ["cliente","proveedor","empleado","personal","otro"];
 function handleTercerosImportFile(file){
   S.tercImportErr=""; S.tercImportRows=null; render();
   var reader = new FileReader();
@@ -991,17 +991,18 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   }
   if(esNC){ lineas = lineas.map(function(l){ return {cuenta:l.cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito}; }); }
 
-  var esPersonal = false;
+  var esPersonal = false, esConocidoPersonal = false;
   if(esCompra){
-    var esProveedorConocido = (proveedores||[]).some(function(p){ return nitMatches(row["NIT Emisor"], p.identificacion); });
-    esPersonal = !esProveedorConocido;
+    esConocidoPersonal = !!(tMatch && tMatch.tipo==="personal");
+    esPersonal = !esMercancia;
   }
+  var etiqueta = esConocidoPersonal ? " [personal]" : (esPersonal ? " [diverso]" : "");
 
   var tot = totalsOf(lineas);
   return {
     tipo: esVenta? "FV":"FC",
     fecha: fecha,
-    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")"+(esPersonal?" [diverso]":""),
+    descripcion: (esNC?"Nota Crédito - ":(esVenta?"Venta - ":"Compra - "))+tercNombre+" ("+docRef+")"+etiqueta,
     lineas: lineas,
     cufe: cufe,
     tercNombre: tercNombre,
@@ -1009,6 +1010,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     esVenta: esVenta,
     esNC: esNC,
     esPersonal: esPersonal,
+    esConocidoPersonal: esConocidoPersonal,
     porReglas: porReglas,
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
@@ -1037,7 +1039,7 @@ function handleImportFile(file){
         if(d._error==="fecha"){ skippedFecha++; if(sampleFecha==null) sampleFecha=d.raw; return; }
         d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
         if(d.cufe) seenInFile[d.cufe]=true;
-        d.include = !d.dup;
+        d.include = !d.dup && !d.esConocidoPersonal;
         drafts.push(d);
       });
       S.importRows = drafts;
@@ -1827,7 +1829,7 @@ function periodosHTML(e){
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
-    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor no esté registrado como <a class="link" onclick="app.setTab(\'terceros\')">proveedor en Terceros</a> se marcan como <b>Diverso</b> (no significa que sea gasto personal, solo que aún no está clasificado) y se importan igual en la cuenta genérica (5195) para que las revises después en Comprobantes — registra el tercero y reclasifícalas, o elimínalas ahí si de verdad no son del negocio.</p>' +
+    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor esté registrado en <a class="link" onclick="app.setTab(\'terceros\')">Terceros</a> con Tipo <b>proveedor</b> se clasifican como compra de mercancía. Las que estén registradas con Tipo <b>personal</b> se marcan de una vez como gasto personal y quedan desmarcadas para que no las importes por accidente. Cualquier otro NIT (no registrado, o registrado como cliente/empleado/otro) se marca como <b>Diverso</b> — no significa que sea personal, solo que falta clasificar — y se importa igual en la cuenta genérica (5195) para que lo revises después en Comprobantes.</p>' +
     '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
@@ -1839,6 +1841,7 @@ function importarHTML(e){
       var flags = "";
       if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
       else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
+      else if(r.esConocidoPersonal) flags = '<span class="chip chip-bad"><span class="chip-dot"></span>Personal (excluido)</span>';
       else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Diverso</span>';
       else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
       return '<tr>' +
@@ -1922,7 +1925,7 @@ function nuevoTerceroModal(){
     '<div class="field"><label>Razón social</label><input id="t-razon" value="'+esc(t.razon_social||"")+'" placeholder="Nombre de la empresa"></div>' :
     '<div class="field-row"><div class="field"><label>Primer apellido</label><input id="t-ap1" value="'+esc(t.primer_apellido||"")+'"></div><div class="field"><label>Segundo apellido</label><input id="t-ap2" value="'+esc(t.segundo_apellido||"")+'"></div></div>' +
     '<div class="field-row"><div class="field"><label>Primer nombre</label><input id="t-nom1" value="'+esc(t.primer_nombre||"")+'"></div><div class="field"><label>Otros nombres</label><input id="t-nom2" value="'+esc(t.otros_nombres||"")+'"></div></div>';
-  var tipoOpts = ["cliente","proveedor","empleado","otro"].map(function(v){return '<option value="'+v+'"'+selOpt(v,t.tipo||"proveedor")+'>'+cap(v)+'</option>';}).join("");
+  var tipoOpts = TIPOS_VALIDOS.map(function(v){return '<option value="'+v+'"'+selOpt(v,t.tipo||"proveedor")+'>'+cap(v)+'</option>';}).join("");
   return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal" style="max-width:480px"><div class="modal-head"><h3>'+(editingTerceroId?"Editar tercero":"Nuevo tercero")+'</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
   '<div class="modal-body">' +
     '<div class="radio-group" style="margin-bottom:13px">' +
