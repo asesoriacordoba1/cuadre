@@ -665,7 +665,7 @@ function nombreCompletoTercero(d){
 }
 async function guardarTercero(d){
   var nombre = nombreCompletoTercero(d);
-  await sb.from("terceros").insert({
+  var res = await sb.from("terceros").insert({
     empresa_id:S.empresaId, nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo, regimen:d.regimen||"",
     autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"", concepto_ingreso:d.concepto_ingreso||"",
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
@@ -673,11 +673,12 @@ async function guardarTercero(d){
     primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
     primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||""
   });
+  if(res.error){ alert("No se pudo guardar el tercero: "+res.error.message); return; }
   closeModal();
 }
 async function actualizarTercero(id, d){
   var nombre = nombreCompletoTercero(d);
-  await sb.from("terceros").update({
+  var res = await sb.from("terceros").update({
     nombre:nombre, identificacion:d.identificacion||"", tipo:d.tipo, regimen:d.regimen||"",
     autorretenedor:!!d.autorretenedor, concepto_retencion:d.concepto_retencion||"", concepto_ingreso:d.concepto_ingreso||"",
     direccion:d.direccion||"", ciudad:d.ciudad||"", departamento:d.departamento||"", pais:d.pais||"Colombia",
@@ -685,6 +686,7 @@ async function actualizarTercero(id, d){
     primer_apellido:d.primer_apellido||"", segundo_apellido:d.segundo_apellido||"",
     primer_nombre:d.primer_nombre||"", otros_nombres:d.otros_nombres||"", razon_social:d.razon_social||""
   }).eq("id", id);
+  if(res.error){ alert("No se pudo actualizar el tercero: "+res.error.message); return; }
   editingTerceroId = null;
   closeModal();
 }
