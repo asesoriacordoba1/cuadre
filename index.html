@@ -272,7 +272,8 @@ var COMPROB_TIPOS=[
   {k:"FC",label:"Factura de Compra"},
   {k:"RC",label:"Recibo de Caja"},
   {k:"CE",label:"Comprobante de Egreso"},
-  {k:"NM",label:"Nómina"}
+  {k:"NM",label:"Nómina"},
+  {k:"CV",label:"Costo de Venta"}
 ];
 var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
@@ -610,6 +611,30 @@ async function guardarComprobante(data){
   var res = await sb.from("comprobantes").upsert(row,{onConflict:"empresa_id,numero"});
   if(res.error){ alert("No se pudo guardar: "+res.error.message); return; }
   closeModal();
+}
+var TASA_COSTO_VENTA = 80;
+function generarCostoVenta(per){
+  if(periodoCerrado(per)){ alert("No puedes generar comprobantes en un periodo cerrado."); return; }
+  var yaExiste = S.comprobantes.some(function(c){ return c.periodo===per && c.tipo==="CV"; });
+  if(yaExiste && !confirm("Ya existe un comprobante de Costo de Venta para "+periodoLabel(per)+". ¿Generar uno nuevo de todas formas? (el anterior no se elimina solo)")) return;
+
+  var gravadaNeta=0, exentaNeta=0;
+  S.comprobantes.forEach(function(c){
+    if(c.periodo!==per || c.tipo!=="FV") return;
+    var esDevol = /^Nota Crédito/.test(c.descripcion||"");
+    var s = gravadaExentaDe(ivaMainDe(c));
+    if(esDevol){ gravadaNeta -= s.gravada; exentaNeta -= s.exenta; }
+    else { gravadaNeta += s.gravada; exentaNeta += s.exenta; }
+  });
+  var totalBase = gravadaNeta+exentaNeta;
+  if(totalBase<=0){ alert("No hay ventas netas en "+periodoLabel(per)+" para calcular el costo de venta."); return; }
+  var costoTotal = Math.round(totalBase * TASA_COSTO_VENTA / 100);
+  var costoGravada = Math.round(costoTotal * gravadaNeta/totalBase);
+  var costoExenta = costoTotal - costoGravada;
+  var lineas = [{cuenta:"613501", tercero:"", detalle:"Costo de venta "+TASA_COSTO_VENTA+"% - "+periodoLabel(per), debito:costoTotal, credito:0}];
+  if(costoGravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Costo de venta - mercancía gravada 19%", debito:0, credito:costoGravada});
+  if(costoExenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Costo de venta - mercancía exenta/excluida", debito:0, credito:costoExenta});
+  guardarComprobante({tipo:"CV", fecha: per+"-01", periodo:per, descripcion:"Costo de venta ("+TASA_COSTO_VENTA+"%) - "+periodoLabel(per), lineas:lineas});
 }
 async function eliminarComprobante(numero){
   var c = S.comprobantes.find(function(x){return x._id===numero;});
@@ -1547,7 +1572,8 @@ function librosHTML(e){
   else if(S.libroSub==="balance") content=balancePruebaHTML(per);
   else if(S.libroSub==="bg") content=balanceGeneralHTML(per);
   else if(S.libroSub==="er") content=estadoResultadosHTML(per);
-  return topbarHTML() + '<div class="toolbar">'+tabsHTML+'</div>' + content;
+  var cvBtn = S.libroSub==="consolidado" ? ('<div class="toolbar" style="margin-top:-6px"><div class="small">Genera el asiento de costo de venta ('+TASA_COSTO_VENTA+'% de las ventas netas del mes) contra mercancía.</div><button class="btn btn-outline btn-sm" onclick="app.generarCostoVenta(\''+per+'\')" '+(periodoCerrado(per)?"disabled":"")+'>Generar Costo de Venta</button></div>') : "";
+  return topbarHTML() + '<div class="toolbar">'+tabsHTML+'</div>' + cvBtn + content;
 }
 
 function formulariosHTML(e){
@@ -2227,6 +2253,7 @@ window.app = {
   },
   eliminarComprobante: eliminarComprobante,
   eliminarComprobantesPeriodoTipo: eliminarComprobantesPeriodoTipo,
+  generarCostoVenta: generarCostoVenta,
 
   cerrarPeriodo: function(p){
     var list=S.comprobantes.filter(function(c){return c.periodo===p;});
