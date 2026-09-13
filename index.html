@@ -378,6 +378,10 @@ var CUENTAS_HARDCODED = [
   {cuenta_codigo:"143590", cuenta_nombre:"MERCANCIA EXENTA/EXCLUIDA"},
   {cuenta_codigo:"513551", cuenta_nombre:"FLETES Y TRANSPORTE"},
   {cuenta_codigo:"513540", cuenta_nombre:"SERVICIOS PUBLICOS"},
+  {cuenta_codigo:"513530", cuenta_nombre:"ENERGIA ELECTRICA"},
+  {cuenta_codigo:"513525", cuenta_nombre:"ACUEDUCTO Y ALCANTARILLADO"},
+  {cuenta_codigo:"513535", cuenta_nombre:"TELEFONO"},
+  {cuenta_codigo:"513548", cuenta_nombre:"INTERNET"},
   {cuenta_codigo:"421330", cuenta_nombre:"DESCUENTOS COMERCIALES CONDICIONADOS"},
   {cuenta_codigo:"220501", cuenta_nombre:"PROVEEDORES NACIONALES"},
   {cuenta_codigo:"613501", cuenta_nombre:"COSTO DE VENTA"}
@@ -1028,10 +1032,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
       if(baseC.gravada<=0 && baseC.exenta<=0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
-    } else if(tMatch && tMatch.concepto_retencion==="fletes"){
-      lineas.push({cuenta:"513551", tercero:"", detalle:"Fletes y transporte "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
-    } else if(tMatch && tMatch.concepto_retencion==="servicios_publicos"){
-      lineas.push({cuenta:"513540", tercero:"", detalle:"Servicios públicos "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+    } else if(tMatch && CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion]){
+      lineas.push({cuenta:CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion], tercero:"", detalle:conceptoGasto+" "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
     } else if(conceptoGasto){
       lineas.push({cuenta:"5195", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
     } else {
@@ -2280,16 +2282,21 @@ var CONCEPTOS_RETENCION = [
   ["","Ninguno"],
   ["compras","Compras (2.5%)"],
   ["arrendamientos","Arrendamientos (3.5%)"],
-  ["servicios_publicos","Servicios públicos (sin retención)"],
+  ["energia","Servicios públicos — Energía (sin retención)"],
+  ["acueducto","Servicios públicos — Acueducto (sin retención)"],
+  ["telefono","Servicios públicos — Teléfono (sin retención)"],
+  ["internet","Servicios públicos — Internet (sin retención)"],
+  ["servicios_publicos","Servicios públicos — genérico (sin retención)"],
   ["fletes","Fletes / transporte de carga (sin retención)"],
   ["seguros","Seguros (sin retención)"],
   ["afiliaciones","Afiliaciones (sin retención)"],
   ["publicidad","Publicidad (sin retención)"],
   ["diversos","Diversos (sin retención)"]
 ];
-var CONCEPTO_LABELS = {arrendamientos:"Arrendamiento", servicios_publicos:"Servicios públicos", fletes:"Fletes", seguros:"Seguros", afiliaciones:"Afiliaciones", publicidad:"Publicidad", diversos:"Diversos"};
-var CONCEPTO_DOC_KEYS = {arrendamientos:"Gasto Arriendo", servicios_publicos:"Gasto Servicios Públicos", fletes:"Gasto Fletes", seguros:"Gasto Seguros", afiliaciones:"Gasto Afiliaciones", publicidad:"Gasto Publicidad", diversos:"Gasto Diversos"};
-var CONCEPTOS_SIN_RETENCION = ["servicios_publicos","fletes","seguros","afiliaciones","publicidad","diversos"];
+var CONCEPTO_LABELS = {arrendamientos:"Arrendamiento", energia:"Energía", acueducto:"Acueducto", telefono:"Teléfono", internet:"Internet", servicios_publicos:"Servicios públicos", fletes:"Fletes", seguros:"Seguros", afiliaciones:"Afiliaciones", publicidad:"Publicidad", diversos:"Diversos"};
+var CONCEPTO_DOC_KEYS = {arrendamientos:"Gasto Arriendo", energia:"Gasto Energía", acueducto:"Gasto Acueducto", telefono:"Gasto Teléfono", internet:"Gasto Internet", servicios_publicos:"Gasto Servicios Públicos", fletes:"Gasto Fletes", seguros:"Gasto Seguros", afiliaciones:"Gasto Afiliaciones", publicidad:"Gasto Publicidad", diversos:"Gasto Diversos"};
+var CONCEPTO_CUENTA_FIJA = {telefono:"513535", energia:"513530", acueducto:"513525", internet:"513548", fletes:"513551", servicios_publicos:"513540"};
+var CONCEPTOS_SIN_RETENCION = ["servicios_publicos","energia","acueducto","telefono","internet","fletes","seguros","afiliaciones","publicidad","diversos"];
 
 var CONCEPTOS_INGRESO = [
   ["","Venta normal"],
