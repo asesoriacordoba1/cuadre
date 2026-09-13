@@ -930,12 +930,26 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     var matches = reglas.filter(function(r){ return r.documento===documentoKey; });
     var exact = regimenBuscado ? matches.filter(function(r){ return r.regimen===regimenBuscado; }) : [];
     var aplicables = exact.length ? exact : matches.filter(function(r){ return !r.regimen; });
+    var porSlot = {};
     aplicables.forEach(function(r){
       var slot = slotDeCuenta(r.cuenta_codigo);
       if(slot==="otro") return;
+      (porSlot[slot]=porSlot[slot]||[]).push(r);
+    });
+    Object.keys(porSlot).forEach(function(slot){
+      var candidatos = porSlot[slot];
+      var elegido = candidatos[0];
+      if(candidatos.length>1){
+        var esGravada = iva>0;
+        var pref = candidatos.find(function(r){
+          var n=(r.cuenta_nombre||"").toUpperCase();
+          return esGravada ? /GRAVAD/.test(n) : /(EXENT|EXCLUI)/.test(n);
+        });
+        if(pref) elegido = pref;
+      }
       var idx = lineas.findIndex(function(l){ return slotDeCuenta(l.cuenta)===slot; });
       if(idx>=0){
-        lineas[idx] = {cuenta:r.cuenta_codigo, tercero:"", detalle:r.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
+        lineas[idx] = {cuenta:elegido.cuenta_codigo, tercero:"", detalle:elegido.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
         porReglas = true;
       }
     });
