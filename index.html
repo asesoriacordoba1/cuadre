@@ -1552,34 +1552,51 @@ function comprobanteMensualHTML(per){
 function filaFormHTML(casilla, concepto, valor){
   return '<tr><td>'+esc(concepto)+'</td><td class="mono" style="text-align:center">'+casilla+'</td><td class="num">'+fmtCOP(valor)+'</td></tr>';
 }
+function splitVentaCompra(c){
+  var iva=0, main=0;
+  (c.lineas||[]).forEach(function(l){
+    var cuenta = l.cuenta||"";
+    var monto = (Number(l.debito)||0) + (Number(l.credito)||0);
+    if(cuenta.slice(0,4)==="2408"){ iva += monto; }
+    else if(c.tipo==="FV" && cuenta[0]==="4"){ main += monto; }
+    else if(c.tipo==="FC" && (cuenta.slice(0,2)==="14"||cuenta.slice(0,2)==="51"||cuenta.slice(0,2)==="52")){ main += monto; }
+  });
+  var gravada = iva>0 ? (iva/19*100) : 0;
+  var exenta = main - gravada;
+  if(Math.abs(exenta)<1) exenta=0;
+  if(exenta<0) exenta=0;
+  return {iva:iva, gravada:gravada, exenta:exenta};
+}
 function formulario300HTML(per){
   var bim = bimestreDePeriodo(per);
   var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
-  function suma(tipo, esDevol, prefijo, lado, excluirPersonal){
-    var t=0;
-    list.forEach(function(c){
-      if(c.tipo!==tipo) return;
-      if(excluirPersonal && /\[personal\]/.test(c.descripcion||"")) return;
-      var devol = /^Nota Crédito/.test(c.descripcion||"");
-      if(devol!==esDevol) return;
-      (c.lineas||[]).forEach(function(l){
-        if((l.cuenta||"").slice(0,prefijo.length)!==prefijo) return;
-        t += Number(l[lado])||0;
-      });
-    });
-    return t;
-  }
-  var c28=suma("FV",false,"413501","credito"), c35=suma("FV",false,"413590","credito");
-  var c41=c28+c35;
-  var c42=suma("FV",true,"413501","debito")+suma("FV",true,"413590","debito");
-  var c43=c41-c42;
-  var c67=suma("FV",false,"2408","credito")-suma("FV",true,"2408","debito");
 
-  var c51=suma("FC",false,"143501","debito",true), c54=suma("FC",false,"143590","debito",true);
+  var vN={gravada:0,exenta:0,iva:0}, vD={gravada:0,exenta:0,iva:0};
+  var cN={gravada:0,exenta:0,iva:0}, cD={gravada:0,exenta:0,iva:0};
+  list.forEach(function(c){
+    var esDevol = /^Nota Crédito/.test(c.descripcion||"");
+    var esPersonal = /\[personal\]/.test(c.descripcion||"");
+    if(c.tipo==="FV"){
+      var s = splitVentaCompra(c);
+      var b = esDevol?vD:vN;
+      b.gravada+=s.gravada; b.exenta+=s.exenta; b.iva+=s.iva;
+    } else if(c.tipo==="FC" && !esPersonal){
+      var s2 = splitVentaCompra(c);
+      var b2 = esDevol?cD:cN;
+      b2.gravada+=s2.gravada; b2.exenta+=s2.exenta; b2.iva+=s2.iva;
+    }
+  });
+  var c28=vN.gravada, c35=vN.exenta;
+  var c41=c28+c35;
+  var c42=vD.gravada+vD.exenta;
+  var c43=c41-c42;
+  var c67=vN.iva-vD.iva;
+
+  var c51=cN.gravada, c54=cN.exenta;
   var c55=c51+c54;
-  var c56=suma("FC",true,"143501","credito",true)+suma("FC",true,"143590","credito",true);
+  var c56=cD.gravada+cD.exenta;
   var c57=c55-c56;
-  var c72=suma("FC",false,"2408","debito",true)-suma("FC",true,"2408","credito",true);
+  var c72=cN.iva-cD.iva;
   var c81=c72;
 
   var saldo=c67-c81;
@@ -1591,11 +1608,10 @@ function formulario300HTML(per){
     listaMes.forEach(function(c){
       var devol=/^Nota Crédito/.test(c.descripcion||"");
       var esPersonal=/\[personal\]/.test(c.descripcion||"");
-      (c.lineas||[]).forEach(function(l){
-        if((l.cuenta||"").slice(0,4)!=="2408") return;
-        if(c.tipo==="FV") gen += devol ? -(Number(l.debito)||0) : (Number(l.credito)||0);
-        else if(c.tipo==="FC" && !esPersonal) desc += devol ? -(Number(l.credito)||0) : (Number(l.debito)||0);
-      });
+      var s = (c.tipo==="FV"||c.tipo==="FC") ? splitVentaCompra(c) : null;
+      if(!s) return;
+      if(c.tipo==="FV") gen += devol ? -s.iva : s.iva;
+      else if(c.tipo==="FC" && !esPersonal) desc += devol ? -s.iva : s.iva;
     });
     var neto = gen-desc;
     return {periodo:p, label: neto>=0?("A pagar "+fmtCOP(neto)):("A favor "+fmtCOP(-neto))};
