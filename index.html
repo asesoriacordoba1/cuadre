@@ -1095,6 +1095,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     tercIdent: tercIdent,
     tercConocido: !!tMatch,
     total: total,
+    iva: iva,
     esVenta: esVenta,
     esNC: esNC,
     esND: esND,
@@ -1933,20 +1934,23 @@ function formulario350HTML(per){
   var sinClasificar = {base:0, ret:0, items:[]};
   var reteIvaTotal = 0;
   list.forEach(function(c){
+    var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
     var nombre = extractTercFromDescripcion(c.descripcion);
     var tMatch = S.terceros.find(function(t){ return nombreCompletoTercero(t)===nombre; });
     var lineaRet = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2365"; });
     var lineaReteIva = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2367"; });
-    if(lineaReteIva) reteIvaTotal += Number(lineaReteIva.credito)||0;
+    if(lineaReteIva) reteIvaTotal += (Number(lineaReteIva.credito)||0) - (Number(lineaReteIva.debito)||0);
     if(!lineaRet) return;
-    var montoRet = Number(lineaRet.credito)||0;
+    var montoRet = (Number(lineaRet.credito)||0) - (Number(lineaRet.debito)||0);
     var esArriendo = /arrendamientos/i.test(lineaRet.detalle||"");
     var base = 0;
-    (c.lineas||[]).forEach(function(l){
-      var pre = (l.cuenta||"").slice(0,2);
-      if(pre==="14"||pre==="51"||pre==="52") base += Number(l.debito)||0;
-    });
-    if(!base) base = c.total_debito||0;
+    if(!esDC){
+      (c.lineas||[]).forEach(function(l){
+        var pre = (l.cuenta||"").slice(0,2);
+        if(pre==="14"||pre==="51"||pre==="52") base += Number(l.debito)||0;
+      });
+      if(!base) base = c.total_debito||0;
+    }
     if(!tMatch){
       sinClasificar.base+=base; sinClasificar.ret+=montoRet; sinClasificar.items.push(nombre);
       return;
@@ -2119,9 +2123,16 @@ function importarHTML(e){
       else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
       var ncToggle = "";
       if(r.esNC && !r.esVenta && !r.dup){
-        ncToggle = r.esDescuentoCondicionado ?
-          '<span class="chip chip-good" style="margin-left:4px">Descuento condicionado</span> <a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>' :
-          '<a class="link" style="margin-left:4px" onclick="app.marcarDescuentoCondicionado('+i+')">¿Es descuento condicionado?</a>';
+        if(r.esDescuentoConRetencion){
+          ncToggle = '<span class="chip chip-good" style="margin-left:4px">Descuento condicionado (afecta retención)</span> <a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>';
+        } else if(r.esDescuentoCondicionado){
+          ncToggle = '<span class="chip chip-good" style="margin-left:4px">Descuento condicionado</span> ' +
+            '<a class="link" onclick="app.marcarDescuentoConRetencion('+i+')">¿también afecta la retención?</a> ' +
+            '<a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>';
+        } else {
+          ncToggle = '<a class="link" style="margin-left:4px" onclick="app.marcarDescuentoCondicionado('+i+')">¿Es descuento condicionado?</a> ' +
+            '<a class="link" onclick="app.marcarDescuentoConRetencion('+i+')">¿y afecta la retención?</a>';
+        }
       }
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
@@ -2467,14 +2478,41 @@ window.app = {
   toggleImportRow: function(i,val){ S.importRows[i].include = val; render(); },
   marcarDescuentoCondicionado: function(i){
     var r = S.importRows && S.importRows[i];
-    if(!r || r.esDescuentoCondicionado) return;
-    r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion;
+    if(!r) return;
+    if(!r.esDescuentoCondicionado){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
     r.lineas = [
       {cuenta:"421330", tercero:"", detalle:"Descuento comercial condicionado - "+r.tercNombre, debito:0, credito:r.total},
       {cuenta:"220501", tercero:"", detalle:"Proveedor "+r.tercNombre+" - descuento condicionado", debito:r.total, credito:0}
     ];
-    r.descripcion = r.descripcion.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
+    r.descripcion = r._descripcionOriginal.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
     r.esDescuentoCondicionado = true;
+    r.esDescuentoConRetencion = false;
+    r.debeCuadra = true;
+    render();
+  },
+  marcarDescuentoConRetencion: function(i){
+    var r = S.importRows && S.importRows[i];
+    if(!r) return;
+    var tMatch = S.terceros.find(function(t){ return t.identificacion && normDigits(t.identificacion)===normDigits(r.tercIdent||""); });
+    if(!tMatch || (tMatch.concepto_retencion!=="compras" && tMatch.concepto_retencion!=="arrendamientos")){
+      alert("Este proveedor no tiene configurado un Concepto de retención (compras/arrendamientos) en Terceros, así que no puedo calcular cuánto ajustar. Configúralo primero si este proveedor sí tiene retención.");
+      return;
+    }
+    if(!r.esDescuentoCondicionado){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
+    var cfg = S.config || {tasa_compras:2.5, tasa_arrendamientos:3.5};
+    var tasa = tMatch.concepto_retencion==="compras" ? cfg.tasa_compras : cfg.tasa_arrendamientos;
+    var ivaNC = Number(r.iva)||0;
+    var baseNC = r.total - ivaNC;
+    var retAjuste = Math.round(baseNC * tasa/100);
+    var neto = r.total - retAjuste;
+    r.lineas = [
+      {cuenta:"421330", tercero:"", detalle:"Descuento comercial condicionado - "+r.tercNombre, debito:0, credito:r.total},
+      {cuenta:"2365", tercero:"", detalle:"Ajuste retención en la fuente por descuento ("+tasa+"%) - "+r.tercNombre, debito:retAjuste, credito:0},
+      {cuenta:"220501", tercero:"", detalle:"Proveedor "+r.tercNombre+" - descuento condicionado (neto de retención)", debito:neto, credito:0}
+    ];
+    r.descripcion = r._descripcionOriginal.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
+    r.esDescuentoCondicionado = true;
+    r.esDescuentoConRetencion = true;
     r.debeCuadra = true;
     render();
   },
@@ -2483,6 +2521,7 @@ window.app = {
     if(!r || !r.esDescuentoCondicionado) return;
     r.lineas = r._lineasOriginal; r.descripcion = r._descripcionOriginal;
     r.esDescuentoCondicionado = false;
+    r.esDescuentoConRetencion = false;
     var tot = totalsOf(r.lineas);
     r.debeCuadra = Math.abs(tot.d-tot.c)<1;
     render();
