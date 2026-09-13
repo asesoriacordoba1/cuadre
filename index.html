@@ -1536,21 +1536,24 @@ function comprobanteMensualHTML(per){
     var key = esDevol ? (c.tipo+"_NC") : c.tipo;
     if(!bloques[key]) bloques[key]={};
     var sc = SPLIT_CODES[c.tipo];
-    if(sc && !agg[key]) agg[key]={iva:0, main:0};
+    var ivaDoc = 0, tieneMain = false;
     (c.lineas||[]).forEach(function(l){
       var cuenta = l.cuenta||"";
-      var monto = (Number(l.debito)||0) + (Number(l.credito)||0);
+      if(cuenta.slice(0,4)==="2408") ivaDoc += (Number(l.debito)||0)+(Number(l.credito)||0);
       if(sc){
-        if(cuenta.slice(0,4)==="2408") agg[key].iva += monto;
-        else {
-          var esMain = c.tipo==="FV" ? cuenta[0]==="4" : cuenta.slice(0,2)==="14";
-          if(esMain){ agg[key].main += monto; return; }
-        }
+        var esMain = c.tipo==="FV" ? cuenta[0]==="4" : cuenta.slice(0,2)==="14";
+        if(esMain){ tieneMain = true; return; }
       }
       if(!bloques[key][cuenta]) bloques[key][cuenta]={d:0,c:0};
       bloques[key][cuenta].d += Number(l.debito)||0;
       bloques[key][cuenta].c += Number(l.credito)||0;
     });
+    if(sc && tieneMain){
+      if(!agg[key]) agg[key]={iva:0, main:0};
+      var total = c.tipo==="FV" ? (Number(c.total_debito)||0) : (Number(c.total_credito)||0);
+      agg[key].iva += ivaDoc;
+      agg[key].main += (total - ivaDoc);
+    }
   });
   Object.keys(agg).forEach(function(key){
     var tipoBase = key.replace(/_NC$/,"");
@@ -1603,15 +1606,12 @@ function filaFormHTML(casilla, concepto, valor){
   return '<tr><td>'+esc(concepto)+'</td><td class="mono" style="text-align:center">'+casilla+'</td><td class="num">'+fmtCOP(valor)+'</td></tr>';
 }
 function ivaMainDe(c){
-  var iva=0, main=0;
+  var iva=0;
   (c.lineas||[]).forEach(function(l){
-    var cuenta = l.cuenta||"";
-    var monto = (Number(l.debito)||0) + (Number(l.credito)||0);
-    if(cuenta.slice(0,4)==="2408"){ iva += monto; }
-    else if(c.tipo==="FV" && cuenta[0]==="4"){ main += monto; }
-    else if(c.tipo==="FC" && cuenta.slice(0,2)==="14"){ main += monto; }
+    if((l.cuenta||"").slice(0,4)==="2408") iva += (Number(l.debito)||0) + (Number(l.credito)||0);
   });
-  return {iva:iva, main:main};
+  var total = c.tipo==="FV" ? (Number(c.total_debito)||0) : (Number(c.total_credito)||0);
+  return {iva:iva, main: total-iva};
 }
 function gravadaExentaDe(agg){
   var gravada = agg.iva>0 ? (agg.iva/19*100) : 0;
