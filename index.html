@@ -1620,6 +1620,7 @@ function tercerosHTML(e){
 
 function categoriaComprobante(c){
   var desc = c.descripcion||"";
+  if(/^Descuento Condicionado/.test(desc)) return "dc";
   if(/^Nota Crédito/.test(desc)) return "nc";
   if(/^Nota Débito/.test(desc)) return "nd";
   if(c.tipo==="NM") return "nomina";
@@ -1632,7 +1633,7 @@ function categoriaComprobante(c){
 }
 var CATEGORIAS_COMPROBANTE = [
   ["","Todos"],["fv","Factura de Venta"],["fc","Factura de Compra"],["gastos","Gastos"],
-  ["nomina","Nóminas"],["nc","Notas Crédito"],["nd","Notas Débito"],["otro","Otros"]
+  ["nomina","Nóminas"],["nc","Notas Crédito"],["nd","Notas Débito"],["dc","Descuentos Condicionados"],["otro","Otros"]
 ];
 function comprobantesFiltrados(){
   var q = (S.compBuscar||"").trim().toLowerCase();
@@ -1749,9 +1750,10 @@ function comprobanteMensualHTML(per){
   var agg={};
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"") && DEVOL_LABELS[c.tipo];
-    var key = esDevol ? (c.tipo+"_NC") : c.tipo;
+    var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
+    var key = esDC ? "DC" : (esDevol ? (c.tipo+"_NC") : c.tipo);
     if(!bloques[key]) bloques[key]={};
-    var sc = SPLIT_CODES[c.tipo];
+    var sc = esDC ? null : SPLIT_CODES[c.tipo];
     var ivaDoc = 0, tieneMain = false;
     (c.lineas||[]).forEach(function(l){
       var cuenta = l.cuenta||"";
@@ -1785,7 +1787,7 @@ function comprobanteMensualHTML(per){
     bloques[key][sc.gravada][lado] += gravada;
     bloques[key][sc.exenta][lado] += exenta;
   });
-  var orden = ["FV","FV_NC","FC","FC_NC","RC","CE","NC","NM"];
+  var orden = ["FV","FV_NC","FC","FC_NC","DC","CV","RC","CE","NC","NM"];
   var claves = Object.keys(bloques).sort(function(a,b){
     var ia=orden.indexOf(a), ib=orden.indexOf(b);
     if(ia<0) ia=99; if(ib<0) ib=99;
@@ -1795,7 +1797,7 @@ function comprobanteMensualHTML(per){
   var html = '<div class="card card-pad"><div class="section-title">Comprobante consolidado — '+periodoLabel(per)+'</div>';
   claves.forEach(function(k){
     var tipoBase = k.replace(/_NC$/,"");
-    var tipoLbl = /_NC$/.test(k) ? DEVOL_LABELS[tipoBase] : ((COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k);
+    var tipoLbl = k==="DC" ? "Descuentos Comerciales Condicionados" : (/_NC$/.test(k) ? DEVOL_LABELS[tipoBase] : ((COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k));
     var codigos = Object.keys(bloques[k]).sort();
     var subD=0, subC=0;
     var filas = codigos.map(function(cod){
@@ -1845,6 +1847,8 @@ function formulario300HTML(per){
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"");
     var esPersonal = /\[(personal|diverso)\]/.test(c.descripcion||"");
+    var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
+    if(esDC) return;
     if(c.tipo==="FV"){
       var s = ivaMainDe(c);
       var b = esDevol?vD:vN;
@@ -2113,11 +2117,17 @@ function importarHTML(e){
       else if(r.esConocidoPersonal) flags = '<span class="chip chip-bad"><span class="chip-dot"></span>Personal (excluido)</span>';
       else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Diverso</span>';
       else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
+      var ncToggle = "";
+      if(r.esNC && !r.esVenta && !r.dup){
+        ncToggle = r.esDescuentoCondicionado ?
+          '<span class="chip chip-good" style="margin-left:4px">Descuento condicionado</span> <a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>' :
+          '<a class="link" style="margin-left:4px" onclick="app.marcarDescuentoCondicionado('+i+')">¿Es descuento condicionado?</a>';
+      }
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
         '<td>'+fmtDate(r.fecha)+'</td>' +
         '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
-        '<td>'+esc(r.tercNombre)+'</td>' +
+        '<td>'+esc(r.tercNombre)+ncToggle+'</td>' +
         '<td class="num">'+fmtCOP(r.total)+'</td>' +
         '<td>'+flags+'</td>' +
       '</tr>';
@@ -2125,7 +2135,7 @@ function importarHTML(e){
     body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
       '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos?"":"disabled")+'>Importar seleccionados</button></div>' +
       '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th class="num">Total</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
-      '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar.</p>';
+      '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución (afectan una factura) — si en realidad es un descuento comercial condicionado, márcalo con el enlace junto al tercero para que se contabilice contra 421330 en vez de reversar la mercancía/IVA.</p>';
   }
 
   body += '<div class="card card-pad" style="margin-top:18px">' +
@@ -2455,6 +2465,28 @@ window.app = {
 
   onImportFile: function(file){ if(!file) return; handleImportFile(file); },
   toggleImportRow: function(i,val){ S.importRows[i].include = val; render(); },
+  marcarDescuentoCondicionado: function(i){
+    var r = S.importRows && S.importRows[i];
+    if(!r || r.esDescuentoCondicionado) return;
+    r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion;
+    r.lineas = [
+      {cuenta:"421330", tercero:"", detalle:"Descuento comercial condicionado - "+r.tercNombre, debito:0, credito:r.total},
+      {cuenta:"220501", tercero:"", detalle:"Proveedor "+r.tercNombre+" - descuento condicionado", debito:r.total, credito:0}
+    ];
+    r.descripcion = r.descripcion.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
+    r.esDescuentoCondicionado = true;
+    r.debeCuadra = true;
+    render();
+  },
+  marcarAfectaFactura: function(i){
+    var r = S.importRows && S.importRows[i];
+    if(!r || !r.esDescuentoCondicionado) return;
+    r.lineas = r._lineasOriginal; r.descripcion = r._descripcionOriginal;
+    r.esDescuentoCondicionado = false;
+    var tot = totalsOf(r.lineas);
+    r.debeCuadra = Math.abs(tot.d-tot.c)<1;
+    render();
+  },
   confirmImport: confirmImport,
 
   analizarCompras: analizarCompras,
