@@ -516,6 +516,7 @@ function currentEmpresa(){ return S.empresas.find(function(e){return e.id===S.em
 function cuentaByCodigo(c){ return S.cuentas.find(function(x){return x.codigo===c;}); }
 function terceroById(id){ return S.terceros.find(function(t){return t.id===id;}); }
 function mayorDe(codigo){ return (codigo||"").slice(0,4); }
+function cod6(codigo){ return codigo && codigo.length>6 ? codigo.slice(0,6) : codigo; }
 function agruparPorMayor(items, campos){
   var out = {};
   items.forEach(function(it){
@@ -899,6 +900,7 @@ function handleReglasImportFile(file){
         if(!doc || !cuentaRaw) return;
         var idx = cuentaRaw.indexOf("-");
         var codigo = idx>=0 ? cuentaRaw.slice(0,idx).trim() : cuentaRaw;
+        if(codigo.length>6) codigo = codigo.slice(0,6);
         var nombreCta = idx>=0 ? cuentaRaw.slice(idx+1).trim() : "";
         var regimen = String(row["Régimen"]||"").trim();
         if(/^n\/?a$/i.test(regimen)) regimen="";
@@ -917,7 +919,11 @@ function handleReglasImportFile(file){
 }
 async function sincronizarCuentasDesdeReglas(reglas){
   var uniq = {};
-  reglas.forEach(function(r){ if(r.cuenta_codigo) uniq[r.cuenta_codigo]=r.cuenta_nombre; });
+  reglas.forEach(function(r){
+    if(!r.cuenta_codigo) return;
+    var cod = r.cuenta_codigo.length>6 ? r.cuenta_codigo.slice(0,6) : r.cuenta_codigo;
+    uniq[cod]=r.cuenta_nombre;
+  });
   var codigos = Object.keys(uniq);
   if(!codigos.length) return;
   for(var i=0;i<S.empresas.length;i++){
@@ -1082,7 +1088,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     var aplicables = exact.length ? exact : matches.filter(function(r){ return !r.regimen; });
     var porSlot = {};
     aplicables.forEach(function(r){
-      var slot = slotDeCuenta(r.cuenta_codigo);
+      var slot = slotDeCuenta(cod6(r.cuenta_codigo));
       if(slot==="otro") return;
       (porSlot[slot]=porSlot[slot]||[]).push(r);
     });
@@ -1099,7 +1105,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       }
       var idx = lineas.findIndex(function(l){ return slotDeCuenta(l.cuenta)===slot; });
       if(idx>=0){
-        lineas[idx] = {cuenta:elegido.cuenta_codigo, tercero:"", detalle:elegido.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
+        lineas[idx] = {cuenta:cod6(elegido.cuenta_codigo), tercero:"", detalle:elegido.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
         porReglas = true;
       }
     });
