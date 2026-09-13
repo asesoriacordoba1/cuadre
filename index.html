@@ -304,6 +304,7 @@ var S = {
   tercBuscar:"",
   compFiltro:"",
   compBuscar:"",
+  compTerceroId:"",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -1693,7 +1694,7 @@ function tercerosHTML(e){
   var rows = listaFiltrada.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
     var nombreCell = esc(t.nombre) + (t.nombre_comercial ? '<br><span class="small">'+esc(t.nombre_comercial)+'</span>' : "");
-    return '<tr><td>'+nombreCell+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
+    return '<tr><td>'+nombreCell+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.verDocumentosTercero(\''+t.id+'\')">Ver documentos</a> · <a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros que coincidan.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
@@ -1745,9 +1746,15 @@ var CATEGORIAS_COMPROBANTE = [
 ];
 function comprobantesFiltrados(){
   var q = (S.compBuscar||"").trim().toLowerCase();
-  if(q){
+  var terc = S.compTerceroId ? terceroById(S.compTerceroId) : null;
+  if(q || terc){
     return S.comprobantes.filter(function(c){
-      return (c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0;
+      if(q && !((c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0)) return false;
+      if(terc){
+        var match = terceroPorNombre(extractTercFromDescripcion(c.descripcion));
+        if(!match || match.id!==terc.id) return false;
+      }
+      return true;
     }).sort(function(a,b){ return (b.periodo+b._id).localeCompare(a.periodo+a._id); });
   }
   var per = S.periodo || todayPeriodo();
@@ -1779,21 +1786,31 @@ function exportarComprobantes(lista){
   XLSX.utils.book_append_sheet(wb, wsDet, "Detalle");
   XLSX.writeFile(wb, "comprobantes_"+(currentEmpresa()?currentEmpresa().nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+".xlsx");
 }
+function tercDropdownHTML(){
+  var opts = '<option value="">Consultar por tercero…</option>' + S.terceros.slice().sort(function(a,b){return (a.nombre||"").localeCompare(b.nombre||"");}).map(function(t){
+    return '<option value="'+t.id+'"'+(S.compTerceroId===t.id?" selected":"")+'>'+esc(t.nombre)+'</option>';
+  }).join("");
+  return '<select onchange="app.setCompTercero(this.value)">'+opts+'</select>';
+}
 function comprobantesHTML(e){
   var per = S.periodo || todayPeriodo();
   var q = (S.compBuscar||"").trim().toLowerCase();
-  if(q){
+  var terc = S.compTerceroId ? terceroById(S.compTerceroId) : null;
+  if(q || terc){
     var found = comprobantesFiltrados();
     var rowsQ = found.map(function(c){
       var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
       return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
         '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
-    }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados para "'+esc(S.compBuscar)+'".</td></tr>';
+    }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados'+(terc?" para "+esc(terc.nombre):' para "'+esc(S.compBuscar)+'"')+'.</td></tr>';
+    var totTerc = found.reduce(function(a,c){return a+(Number(c.total_debito)||0);},0);
     return topbarHTML() +
-    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div><div class="btn-row">' +
+    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' + tercDropdownHTML() + '<div class="btn-row">' +
       '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+found.length+')</button>' +
-      '<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button></div></div>' +
-    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos.</div>' +
+      (q?'<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button>':"") +
+      (terc?'<button class="btn btn-outline btn-sm" onclick="app.setCompTercero(\'\')">Limpiar tercero</button>':"") +
+    '</div></div>' +
+    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos'+(terc?" para "+esc(terc.nombre)+" — total "+fmtCOP(totTerc):"")+'.</div>' +
     '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rowsQ+'</tbody></table></div>';
   }
   var listPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
@@ -1818,7 +1835,7 @@ function comprobantesHTML(e){
     return '<button class="btn btn-outline btn-sm" style="color:var(--bad)" onclick="app.eliminarComprobantesPeriodoTipo(\''+per+'\',\''+t+'\')" '+((periodoCerrado(per)||S.bulkDeleteBusy)?"disabled":"")+'>Eliminar todos: '+esc(lbl)+' ('+tiposPresentes[t]+')</button>';
   }).join(" ");
   return topbarHTML() +
-  '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row"><div class="search-box"><input id="comp-buscar" value="" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' +
+  '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row"><div class="search-box"><input id="comp-buscar" value="" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' + tercDropdownHTML() +
   '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+list.length+')</button>' +
   '<button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div></div>' +
   '<div class="toolbar" style="margin-top:-10px"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div></div>' +
@@ -2504,7 +2521,9 @@ window.app = {
   setTercFiltro: function(t){ S.tercFiltro=t; render(); },
   setTercBuscar: function(v){ S.tercBuscar=v; render(); },
   setCompFiltro: function(t){ S.compFiltro=t; render(); },
-  setCompBuscar: function(v){ S.compBuscar=v; render(); },
+  setCompBuscar: function(v){ S.compBuscar=v; S.compTerceroId=""; render(); },
+  setCompTercero: function(id){ S.compTerceroId=id; S.compBuscar=""; render(); },
+  verDocumentosTercero: function(id){ S.compTerceroId=id; S.compBuscar=""; S.tab="comprobantes"; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
   backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
