@@ -372,6 +372,8 @@ function boot(){
 var CUENTAS_HARDCODED = [
   {cuenta_codigo:"413501", cuenta_nombre:"VENTAS GRAVADAS 19%"},
   {cuenta_codigo:"413590", cuenta_nombre:"VENTAS EXENTAS/EXCLUIDAS"},
+  {cuenta_codigo:"417501", cuenta_nombre:"DEVOLUCION EN VENTAS MERCANCIA GRAVADA 19%"},
+  {cuenta_codigo:"417590", cuenta_nombre:"DEVOLUCION EN VENTAS MERCANCIA EXENTA/EXCLUIDA"},
   {cuenta_codigo:"413518", cuenta_nombre:"VENTA DE ANIMALES VIVOS Y CUEROS"},
   {cuenta_codigo:"424525", cuenta_nombre:"INGRESOS POR ARRENDAMIENTOS"},
   {cuenta_codigo:"143501", cuenta_nombre:"MERCANCIA GRAVADA 19%"},
@@ -382,6 +384,7 @@ var CUENTAS_HARDCODED = [
   {cuenta_codigo:"513525", cuenta_nombre:"ACUEDUCTO Y ALCANTARILLADO"},
   {cuenta_codigo:"513535", cuenta_nombre:"TELEFONO"},
   {cuenta_codigo:"513548", cuenta_nombre:"INTERNET"},
+  {cuenta_codigo:"516095", cuenta_nombre:"SEGUROS GENERALES"},
   {cuenta_codigo:"421330", cuenta_nombre:"DESCUENTOS COMERCIALES CONDICIONADOS"},
   {cuenta_codigo:"220501", cuenta_nombre:"PROVEEDORES NACIONALES"},
   {cuenta_codigo:"613501", cuenta_nombre:"COSTO DE VENTA"}
@@ -1090,7 +1093,13 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       return l;
     });
   }
-  if(esNC){ lineas = lineas.map(function(l){ return {cuenta:l.cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito}; }); }
+  if(esNC){
+    var remapDevolVenta = {"413501":"417501", "413590":"417590"};
+    lineas = lineas.map(function(l){
+      var cuenta = (esVenta && remapDevolVenta[l.cuenta]) ? remapDevolVenta[l.cuenta] : l.cuenta;
+      return {cuenta:cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito};
+    });
+  }
 
   var esPersonal = false, esConocidoPersonal = false;
   if(esCompra){
@@ -1821,7 +1830,7 @@ function comprobanteMensualHTML(per){
     var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
     var key = esDC ? "DC" : (esDevol ? (c.tipo+"_NC") : c.tipo);
     if(!bloques[key]) bloques[key]={};
-    var sc = esDC ? null : SPLIT_CODES[c.tipo];
+    var sc = (esDC || esDevol) ? null : SPLIT_CODES[c.tipo];
     var ivaDoc = 0, tieneMain = false;
     (c.lineas||[]).forEach(function(l){
       var cuenta = l.cuenta||"";
@@ -2295,7 +2304,7 @@ var CONCEPTOS_RETENCION = [
 ];
 var CONCEPTO_LABELS = {arrendamientos:"Arrendamiento", energia:"Energía", acueducto:"Acueducto", telefono:"Teléfono", internet:"Internet", servicios_publicos:"Servicios públicos", fletes:"Fletes", seguros:"Seguros", afiliaciones:"Afiliaciones", publicidad:"Publicidad", diversos:"Diversos"};
 var CONCEPTO_DOC_KEYS = {arrendamientos:"Gasto Arriendo", energia:"Gasto Energía", acueducto:"Gasto Acueducto", telefono:"Gasto Teléfono", internet:"Gasto Internet", servicios_publicos:"Gasto Servicios Públicos", fletes:"Gasto Fletes", seguros:"Gasto Seguros", afiliaciones:"Gasto Afiliaciones", publicidad:"Gasto Publicidad", diversos:"Gasto Diversos"};
-var CONCEPTO_CUENTA_FIJA = {telefono:"513535", energia:"513530", acueducto:"513525", internet:"513548", fletes:"513551", servicios_publicos:"513540"};
+var CONCEPTO_CUENTA_FIJA = {telefono:"513535", energia:"513530", acueducto:"513525", internet:"513548", fletes:"513551", servicios_publicos:"513540", seguros:"516095"};
 var CONCEPTOS_SIN_RETENCION = ["servicios_publicos","energia","acueducto","telefono","internet","fletes","seguros","afiliaciones","publicidad","diversos"];
 
 var CONCEPTOS_INGRESO = [
