@@ -515,6 +515,27 @@ function distinctPeriodos(){
 function currentEmpresa(){ return S.empresas.find(function(e){return e.id===S.empresaId;}); }
 function cuentaByCodigo(c){ return S.cuentas.find(function(x){return x.codigo===c;}); }
 function terceroById(id){ return S.terceros.find(function(t){return t.id===id;}); }
+function mayorDe(codigo){ return (codigo||"").slice(0,4); }
+function agruparPorMayor(items, campos){
+  var out = {};
+  items.forEach(function(it){
+    var mayor = mayorDe(it.codigo);
+    if(!out[mayor]) out[mayor] = {codigo:mayor, nombre:"", tipo:it.tipo, naturaleza:it.naturaleza, subs:[]};
+    var g = out[mayor];
+    campos.forEach(function(f){ g[f] = (g[f]||0) + (Number(it[f])||0); });
+    if(it.codigo===mayor) g.nombre = it.nombre;
+    else g.subs.push(it);
+  });
+  Object.keys(out).forEach(function(mayor){
+    var g = out[mayor];
+    if(!g.nombre){
+      var ac = cuentaByCodigo(mayor);
+      g.nombre = ac ? ac.nombre : mayor;
+    }
+    g.subs.sort(function(a,b){ return a.codigo<b.codigo?-1:(a.codigo>b.codigo?1:0); });
+  });
+  return out;
+}
 
 /* ---------- create empresa ---------- */
 async function crearEmpresa(nombre, nit, sector, grupo){
@@ -1892,13 +1913,21 @@ function comprobanteMensualHTML(per){
   var html = '<div class="card card-pad"><div class="section-title">Comprobante consolidado — '+periodoLabel(per)+'</div>';
   claves.forEach(function(k){
     var tipoLbl = BLOQUE_LABELS[k] || (COMPROB_TIPOS.find(function(t){return t.k===k;})||{}).label || k;
-    var codigos = Object.keys(bloques[k]).sort();
-    var subD=0, subC=0;
-    var filas = codigos.map(function(cod){
+    var items = Object.keys(bloques[k]).map(function(cod){
       var s = bloques[k][cod];
-      subD+=s.d; subC+=s.c;
       var ac = cuentaByCodigo(cod);
-      return '<tr><td class="mono acct-code">'+cod+'</td><td>'+esc(ac?ac.nombre:"")+'</td><td class="num">'+(s.d?fmtCOP(s.d):"")+'</td><td class="num">'+(s.c?fmtCOP(s.c):"")+'</td></tr>';
+      return {codigo:cod, nombre:ac?ac.nombre:"", d:s.d, c:s.c};
+    });
+    var grupos = agruparPorMayor(items, ["d","c"]);
+    var subD=0, subC=0;
+    var filas = Object.keys(grupos).sort().map(function(mayor){
+      var g = grupos[mayor];
+      subD+=g.d; subC+=g.c;
+      var fila = '<tr><td class="mono acct-code">'+mayor+'</td><td>'+esc(g.nombre)+'</td><td class="num">'+(g.d?fmtCOP(g.d):"")+'</td><td class="num">'+(g.c?fmtCOP(g.c):"")+'</td></tr>';
+      g.subs.forEach(function(s){
+        fila += '<tr class="small" style="opacity:.7"><td class="mono acct-code" style="padding-left:22px">'+s.codigo+'</td><td>'+esc(s.nombre)+'</td><td class="num">'+(s.d?fmtCOP(s.d):"")+'</td><td class="num">'+(s.c?fmtCOP(s.c):"")+'</td></tr>';
+      });
+      return fila;
     }).join("");
     totD+=subD; totC+=subC;
     html += '<div class="small" style="font-weight:600;margin:16px 0 6px">'+tipoLbl+'</div>' +
@@ -2106,13 +2135,21 @@ function libroDiarioHTML(per){
 function libroMayorHTML(per){
   var ini = computeSaldos(prevPeriodo(per));
   var mov = movimientosPeriodo(per);
-  var rows="";
-  S.cuentas.filter(function(c){return c.postable;}).forEach(function(c){
+  var items = S.cuentas.filter(function(c){return c.postable;}).map(function(c){
     var si = saldoNeto(c.codigo, ini);
     var m = mov[c.codigo]||{d:0,c:0};
-    if(!si && !m.d && !m.c) return;
-    var sf = c.naturaleza==="debito" ? si+m.d-m.c : si+m.c-m.d;
-    rows += '<tr><td class="mono acct-code">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(si)+'</td><td class="num">'+fmtCOP(m.d)+'</td><td class="num">'+fmtCOP(m.c)+'</td><td class="num">'+fmtCOP(sf)+'</td></tr>';
+    return {codigo:c.codigo, nombre:c.nombre, tipo:c.tipo, naturaleza:c.naturaleza, si:si, d:m.d, c:m.c};
+  }).filter(function(e){return e.si || e.d || e.c;});
+  var grupos = agruparPorMayor(items, ["si","d","c"]);
+  var rows="";
+  Object.keys(grupos).sort().forEach(function(mayor){
+    var g = grupos[mayor];
+    var sf = g.naturaleza==="debito" ? g.si+g.d-g.c : g.si+g.c-g.d;
+    rows += '<tr><td class="mono acct-code">'+mayor+'</td><td>'+esc(g.nombre)+'</td><td class="num">'+fmtCOP(g.si)+'</td><td class="num">'+fmtCOP(g.d)+'</td><td class="num">'+fmtCOP(g.c)+'</td><td class="num">'+fmtCOP(sf)+'</td></tr>';
+    g.subs.forEach(function(s){
+      var ssf = g.naturaleza==="debito" ? s.si+s.d-s.c : s.si+s.c-s.d;
+      rows += '<tr class="small" style="opacity:.7"><td class="mono acct-code" style="padding-left:22px">'+s.codigo+'</td><td>'+esc(s.nombre)+'</td><td class="num">'+fmtCOP(s.si)+'</td><td class="num">'+fmtCOP(s.d)+'</td><td class="num">'+fmtCOP(s.c)+'</td><td class="num">'+fmtCOP(ssf)+'</td></tr>';
+    });
   });
   if(!rows) rows='<tr><td colspan="6" class="small" style="padding:16px 10px">Sin movimientos en '+periodoLabel(per)+'.</td></tr>';
   return '<div class="card table-wrap"><table class="data"><thead><tr><th>Cuenta</th><th>Nombre</th><th class="num">Saldo inicial</th><th class="num">Débitos</th><th class="num">Créditos</th><th class="num">Saldo final</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
@@ -2120,13 +2157,21 @@ function libroMayorHTML(per){
 
 function balancePruebaHTML(per){
   var sums = computeSaldos(per);
+  var items = S.cuentas.filter(function(c){return c.postable;}).map(function(c){
+    var s = sums[c.codigo]||{d:0,c:0};
+    return {codigo:c.codigo, nombre:c.nombre, tipo:c.tipo, naturaleza:c.naturaleza, d:s.d, c:s.c};
+  }).filter(function(e){return e.d || e.c;});
+  var grupos = agruparPorMayor(items, ["d","c"]);
   var rows=""; var tD=0,tC=0;
-  S.cuentas.filter(function(c){return c.postable;}).forEach(function(c){
-    var s=sums[c.codigo]||{d:0,c:0};
-    if(!s.d && !s.c) return;
-    tD+=s.d; tC+=s.c;
-    var n=saldoNeto(c.codigo,sums);
-    rows += '<tr><td class="mono acct-code">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(s.d)+'</td><td class="num">'+fmtCOP(s.c)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+  Object.keys(grupos).sort().forEach(function(mayor){
+    var g = grupos[mayor];
+    tD+=g.d; tC+=g.c;
+    var n = g.naturaleza==="debito" ? g.d-g.c : g.c-g.d;
+    rows += '<tr><td class="mono acct-code">'+mayor+'</td><td>'+esc(g.nombre)+'</td><td class="num">'+fmtCOP(g.d)+'</td><td class="num">'+fmtCOP(g.c)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+    g.subs.forEach(function(s){
+      var sn = g.naturaleza==="debito" ? s.d-s.c : s.c-s.d;
+      rows += '<tr class="small" style="opacity:.7"><td class="mono acct-code" style="padding-left:22px">'+s.codigo+'</td><td>'+esc(s.nombre)+'</td><td class="num">'+fmtCOP(s.d)+'</td><td class="num">'+fmtCOP(s.c)+'</td><td class="num">'+fmtCOP(sn)+'</td></tr>';
+    });
   });
   if(!rows) rows='<tr><td colspan="5" class="small" style="padding:16px 10px">Sin movimientos.</td></tr>';
   var cuadra = Math.abs(tD-tC)<1;
@@ -2138,10 +2183,18 @@ function balancePruebaHTML(per){
 function balanceGeneralHTML(per){
   var sums=computeSaldos(per); var util=utilidadAcumulada(per);
   function block(tipo){
+    var items = S.cuentas.filter(function(c){return c.postable && c.tipo===tipo;}).map(function(c){
+      return {codigo:c.codigo, nombre:c.nombre, tipo:c.tipo, naturaleza:c.naturaleza, n:saldoNeto(c.codigo,sums)};
+    }).filter(function(e){return e.n;});
+    var grupos = agruparPorMayor(items, ["n"]);
     var rows=""; var sub=0;
-    S.cuentas.filter(function(c){return c.postable && c.tipo===tipo;}).forEach(function(c){
-      var n=saldoNeto(c.codigo,sums); if(!n) return; sub+=n;
-      rows+='<tr><td class="mono acct-code indent-1">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+    Object.keys(grupos).sort().forEach(function(mayor){
+      var g = grupos[mayor];
+      sub+=g.n;
+      rows+='<tr><td class="mono acct-code indent-1">'+mayor+'</td><td>'+esc(g.nombre)+'</td><td class="num">'+fmtCOP(g.n)+'</td></tr>';
+      g.subs.forEach(function(s){
+        rows+='<tr class="small" style="opacity:.7"><td class="mono acct-code indent-1" style="padding-left:30px">'+s.codigo+'</td><td>'+esc(s.nombre)+'</td><td class="num">'+fmtCOP(s.n)+'</td></tr>';
+      });
     });
     return {rows:rows,total:sub};
   }
@@ -2161,10 +2214,18 @@ function balanceGeneralHTML(per){
 function estadoResultadosHTML(per){
   var util=utilidadAcumulada(per); var sums=computeSaldos(per);
   function block(tipo){
+    var items = S.cuentas.filter(function(c){return c.postable && c.tipo===tipo;}).map(function(c){
+      return {codigo:c.codigo, nombre:c.nombre, tipo:c.tipo, naturaleza:c.naturaleza, n:saldoNeto(c.codigo,sums)};
+    }).filter(function(e){return e.n;});
+    var grupos = agruparPorMayor(items, ["n"]);
     var rows=""; var sub=0;
-    S.cuentas.filter(function(c){return c.postable && c.tipo===tipo;}).forEach(function(c){
-      var n=saldoNeto(c.codigo,sums); if(!n) return; sub+=n;
-      rows+='<tr><td class="mono acct-code indent-1">'+c.codigo+'</td><td>'+esc(c.nombre)+'</td><td class="num">'+fmtCOP(n)+'</td></tr>';
+    Object.keys(grupos).sort().forEach(function(mayor){
+      var g = grupos[mayor];
+      sub+=g.n;
+      rows+='<tr><td class="mono acct-code indent-1">'+mayor+'</td><td>'+esc(g.nombre)+'</td><td class="num">'+fmtCOP(g.n)+'</td></tr>';
+      g.subs.forEach(function(s){
+        rows+='<tr class="small" style="opacity:.7"><td class="mono acct-code indent-1" style="padding-left:30px">'+s.codigo+'</td><td>'+esc(s.nombre)+'</td><td class="num">'+fmtCOP(s.n)+'</td></tr>';
+      });
     });
     return {rows:rows,total:sub};
   }
