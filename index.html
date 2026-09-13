@@ -138,6 +138,10 @@ table.data tbody tr:hover{background:var(--surface-2)}
 .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:5px}
 .field input,.field select,.field textarea{width:100%;border:1px solid var(--border);background:var(--bg);color:var(--ink);border-radius:8px;padding:9px 10px;font-size:13.5px}
 .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.search-box{position:relative;min-width:220px}
+.search-box input{width:100%;border:1px solid var(--border);background:var(--bg);color:var(--ink);border-radius:8px;padding:8px 10px 8px 30px;font-size:13.5px}
+.search-box input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.search-box::before{content:"⌕";position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--ink-soft);font-size:14px;pointer-events:none}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .field-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
 .radio-group{display:flex;gap:8px}
@@ -297,7 +301,9 @@ var S = {
   libroSub:"consolidado",
   formSub:"iva300",
   tercFiltro:"",
+  tercBuscar:"",
   compFiltro:"",
+  compBuscar:"",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -1311,7 +1317,20 @@ function render(){
     });
     return;
   }
+  var activeEl = document.activeElement;
+  var activeId = activeEl && activeEl.id;
+  var selStart, selEnd;
+  if(activeId && (activeEl.tagName==="INPUT"||activeEl.tagName==="TEXTAREA")){
+    selStart = activeEl.selectionStart; selEnd = activeEl.selectionEnd;
+  }
   root.innerHTML = sidebarHTML() + mainHTML() + (modalHTML||"");
+  if(activeId){
+    var again = document.getElementById(activeId);
+    if(again && (again.tagName==="INPUT"||again.tagName==="TEXTAREA")){
+      again.focus();
+      if(selStart!=null && again.setSelectionRange){ try{ again.setSelectionRange(selStart, selEnd); }catch(err){} }
+    }
+  }
 }
 
 function navItem(key, icon, label){
@@ -1513,13 +1532,18 @@ function tercerosHTML(e){
       return '<button class="'+(S.tercFiltro===f[0]?"active":"")+'" onclick="app.setTercFiltro(\''+f[0]+'\')">'+f[1]+' ('+f[2]+')</button>';
     }).join("");
   var listaFiltrada = S.tercFiltro ? S.terceros.filter(function(t){return (t.tipo||"otro")===S.tercFiltro;}) : S.terceros;
+  var q = (S.tercBuscar||"").trim().toLowerCase();
+  if(q) listaFiltrada = listaFiltrada.filter(function(t){
+    return (t.nombre||"").toLowerCase().indexOf(q)>=0 || normDigits(t.identificacion||"").indexOf(normDigits(q))>=0;
+  });
   var rows = listaFiltrada.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
     return '<tr><td>'+esc(t.nombre)+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
-  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros'+(S.tercFiltro?" de este tipo":" registrados")+'.</td></tr>';
+  }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros que coincidan.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
   '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row">' +
+    '<div class="search-box"><input id="terc-buscar" value="'+esc(S.tercBuscar||"")+'" oninput="app.setTercBuscar(this.value)" placeholder="Buscar por nombre o identificación..."></div>' +
     '<button class="btn btn-outline btn-sm" onclick="app.descargarPlantillaTerceros()">Descargar plantilla</button>' +
     '<label class="btn btn-outline btn-sm" style="margin-bottom:0"><input type="file" accept=".xlsx,.xls" style="display:none" onchange="app.onTercerosImportFile(this.files[0])">Importar terceros</label>' +
     '<button class="btn btn-sm" onclick="app.openNuevoTercero()">+ Nuevo tercero</button>' +
@@ -1564,6 +1588,22 @@ var CATEGORIAS_COMPROBANTE = [
 ];
 function comprobantesHTML(e){
   var per = S.periodo || todayPeriodo();
+  var q = (S.compBuscar||"").trim().toLowerCase();
+  if(q){
+    var found = S.comprobantes.filter(function(c){
+      return (c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0;
+    }).sort(function(a,b){ return (b.periodo+b._id).localeCompare(a.periodo+a._id); });
+    var rowsQ = found.map(function(c){
+      var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
+      return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
+        '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
+    }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados para "'+esc(S.compBuscar)+'".</td></tr>';
+    return topbarHTML() +
+    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' +
+      '<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button></div>' +
+    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos.</div>' +
+    '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rowsQ+'</tbody></table></div>';
+  }
   var listPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
   var conteos = {};
   listPeriodo.forEach(function(c){ var k=categoriaComprobante(c); conteos[k]=(conteos[k]||0)+1; });
@@ -1586,7 +1626,8 @@ function comprobantesHTML(e){
     return '<button class="btn btn-outline btn-sm" style="color:var(--bad)" onclick="app.eliminarComprobantesPeriodoTipo(\''+per+'\',\''+t+'\')" '+((periodoCerrado(per)||S.bulkDeleteBusy)?"disabled":"")+'>Eliminar todos: '+esc(lbl)+' ('+tiposPresentes[t]+')</button>';
   }).join(" ");
   return topbarHTML() +
-  '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div>' +
+  '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row"><div class="search-box"><input id="comp-buscar" value="" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' +
+  '<button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div></div>' +
   '<div class="toolbar" style="margin-top:-10px"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div></div>' +
   (bulkBtns ? '<div class="toolbar" style="margin-top:-6px"><div class="small">Volver a importar el período (borra en bloque por tipo):</div><div class="btn-row">'+bulkBtns+'</div></div>' : "") +
   '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
@@ -2169,7 +2210,9 @@ window.app = {
   setLibroSub: function(t){ S.libroSub=t; render(); },
   setFormSub: function(t){ S.formSub=t; render(); },
   setTercFiltro: function(t){ S.tercFiltro=t; render(); },
+  setTercBuscar: function(v){ S.tercBuscar=v; render(); },
   setCompFiltro: function(t){ S.compFiltro=t; render(); },
+  setCompBuscar: function(v){ S.compBuscar=v; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
   backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
