@@ -294,6 +294,7 @@ var S = {
   periodosDocs:{},
   tab:"dashboard",
   libroSub:"consolidado",
+  formSub:"iva300",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -328,6 +329,13 @@ function periodoLabel(p){
 function todayISO(){var d=new Date();return d.toISOString().slice(0,10);}
 function todayPeriodo(){return todayISO().slice(0,7);}
 function prevPeriodo(p){var y=parseInt(p.slice(0,4),10),m=parseInt(p.slice(5,7),10); m--; if(m<1){m=12;y--;} return y+"-"+String(m).padStart(2,"0");}
+var BIMESTRES=[["01","Enero-Febrero"],["02","Marzo-Abril"],["03","Mayo-Junio"],["04","Julio-Agosto"],["05","Septiembre-Octubre"],["06","Noviembre-Diciembre"]];
+function bimestreDePeriodo(per){
+  var year=per.slice(0,4), month=parseInt(per.slice(5,7),10);
+  var idx=Math.ceil(month/2)-1; if(idx<0) idx=0; if(idx>5) idx=5;
+  var m1=idx*2+1, m2=idx*2+2;
+  return {codigo:BIMESTRES[idx][0], label:BIMESTRES[idx][1]+" "+year, periodos:[year+"-"+String(m1).padStart(2,"0"), year+"-"+String(m2).padStart(2,"0")]};
+}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function debounce(fn, ms){
   var t=null;
@@ -1261,6 +1269,7 @@ function sidebarHTML(){
       navItem("comprobantes","▥","Comprobantes") +
       navItem("importar","⇩","Importar DIAN") +
       navItem("libros","▦","Libros y estados") +
+      navItem("formularios","▧","Formularios DIAN") +
       navItem("periodos","◔","Periodos") +
     '</div>' +
     '<div class="sidebar-foot">Sesión: <span class="who">'+esc(S.session.user.email)+'</span><br><a onclick="app.logout()">Cerrar sesión</a></div>' +
@@ -1281,6 +1290,7 @@ function mainHTML(){
   else if(S.tab==="terceros") body=tercerosHTML(e);
   else if(S.tab==="comprobantes") body=comprobantesHTML(e);
   else if(S.tab==="libros") body=librosHTML(e);
+  else if(S.tab==="formularios") body=formulariosHTML(e);
   else if(S.tab==="periodos") body=periodosHTML(e);
   else if(S.tab==="importar") body=importarHTML(e);
 
@@ -1289,7 +1299,7 @@ function mainHTML(){
   return '<div class="main">' + demoBanner + body + '</div>';
 }
 
-var TAB_TITLES={dashboard:["Panel","Resumen de la empresa"],plan:["Plan de cuentas","Catálogo contable configurable por grupo NIIF"],terceros:["Terceros","Clientes, proveedores y empleados"],comprobantes:["Comprobantes","Registro de movimientos contables"],libros:["Libros y estados financieros","Generados automáticamente a partir de tus comprobantes"],periodos:["Periodos","Cierre mensual con validaciones"],importar:["Importar DIAN","Sube el reporte de documentos electrónicos y arma los comprobantes automáticamente"]};
+var TAB_TITLES={dashboard:["Panel","Resumen de la empresa"],plan:["Plan de cuentas","Catálogo contable configurable por grupo NIIF"],terceros:["Terceros","Clientes, proveedores y empleados"],comprobantes:["Comprobantes","Registro de movimientos contables"],libros:["Libros y estados financieros","Generados automáticamente a partir de tus comprobantes"],formularios:["Formularios DIAN","IVA (300) y Retención en la fuente (350), calculados a partir de tus comprobantes"],periodos:["Periodos","Cierre mensual con validaciones"],importar:["Importar DIAN","Sube el reporte de documentos electrónicos y arma los comprobantes automáticamente"]};
 
 function topbarHTML(){
   var t = TAB_TITLES[S.tab];
@@ -1483,6 +1493,14 @@ function librosHTML(e){
   return topbarHTML() + '<div class="toolbar">'+tabsHTML+'</div>' + content;
 }
 
+function formulariosHTML(e){
+  var per = S.periodo || todayPeriodo();
+  var subtabs = [["iva300","IVA — Formulario 300"],["ret350","Retención — Formulario 350"]];
+  var tabsHTML = '<div class="tabs-sub">'+subtabs.map(function(t){return '<button class="'+(S.formSub===t[0]?"active":"")+'" onclick="app.setFormSub(\''+t[0]+'\')">'+t[1]+'</button>';}).join("")+'</div>';
+  var content = S.formSub==="iva300" ? formulario300HTML(per) : formulario350HTML(per);
+  return topbarHTML() + '<div class="toolbar">'+tabsHTML+'</div>' + content;
+}
+
 function comprobanteMensualHTML(per){
   var list = S.comprobantes.filter(function(c){return c.periodo===per;});
   if(!list.length) return '<div class="card card-pad"><p class="small">Sin comprobantes en '+periodoLabel(per)+'.</p></div>';
@@ -1528,6 +1546,157 @@ function comprobanteMensualHTML(per){
     '<div class="card kpi"><div class="lbl">Total crédito</div><div class="val">'+fmtCOP(totC)+'</div></div>' +
     '<div class="card kpi"><div class="lbl">Cuadre</div><div class="val">'+(cuadra?'<span class="chip chip-good"><span class="chip-dot"></span>Cuadra</span>':'<span class="chip chip-bad"><span class="chip-dot"></span>No cuadra</span>')+'</div></div>' +
   '</div></div>';
+  return html;
+}
+
+function filaFormHTML(casilla, concepto, valor){
+  return '<tr><td>'+esc(concepto)+'</td><td class="mono" style="text-align:center">'+casilla+'</td><td class="num">'+fmtCOP(valor)+'</td></tr>';
+}
+function formulario300HTML(per){
+  var bim = bimestreDePeriodo(per);
+  var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
+  function suma(tipo, esDevol, prefijo, lado, excluirPersonal){
+    var t=0;
+    list.forEach(function(c){
+      if(c.tipo!==tipo) return;
+      if(excluirPersonal && /\[personal\]/.test(c.descripcion||"")) return;
+      var devol = /^Nota Crédito/.test(c.descripcion||"");
+      if(devol!==esDevol) return;
+      (c.lineas||[]).forEach(function(l){
+        if((l.cuenta||"").slice(0,prefijo.length)!==prefijo) return;
+        t += Number(l[lado])||0;
+      });
+    });
+    return t;
+  }
+  var c28=suma("FV",false,"413501","credito"), c35=suma("FV",false,"413590","credito");
+  var c41=c28+c35;
+  var c42=suma("FV",true,"413501","debito")+suma("FV",true,"413590","debito");
+  var c43=c41-c42;
+  var c67=suma("FV",false,"2408","credito")-suma("FV",true,"2408","debito");
+
+  var c51=suma("FC",false,"143501","debito",true), c54=suma("FC",false,"143590","debito",true);
+  var c55=c51+c54;
+  var c56=suma("FC",true,"143501","credito",true)+suma("FC",true,"143590","credito",true);
+  var c57=c55-c56;
+  var c72=suma("FC",false,"2408","debito",true)-suma("FC",true,"2408","credito",true);
+  var c81=c72;
+
+  var saldo=c67-c81;
+  var c82=saldo>0?saldo:0, c83=saldo<0?-saldo:0;
+
+  var meses = bim.periodos.map(function(p){
+    var listaMes = S.comprobantes.filter(function(c){return c.periodo===p;});
+    var gen=0, desc=0;
+    listaMes.forEach(function(c){
+      var devol=/^Nota Crédito/.test(c.descripcion||"");
+      var esPersonal=/\[personal\]/.test(c.descripcion||"");
+      (c.lineas||[]).forEach(function(l){
+        if((l.cuenta||"").slice(0,4)!=="2408") return;
+        if(c.tipo==="FV") gen += devol ? -(Number(l.debito)||0) : (Number(l.credito)||0);
+        else if(c.tipo==="FC" && !esPersonal) desc += devol ? -(Number(l.credito)||0) : (Number(l.debito)||0);
+      });
+    });
+    var neto = gen-desc;
+    return {periodo:p, label: neto>=0?("A pagar "+fmtCOP(neto)):("A favor "+fmtCOP(-neto))};
+  });
+
+  var html = '<div class="card card-pad">' +
+    '<div class="section-title">Declaración IVA — Formulario 300 · '+esc(bim.label)+'</div>' +
+    '<p class="small">Bimestral · Periodo DIAN '+bim.codigo+' · Calculado a partir de los comprobantes de '+periodoLabel(bim.periodos[0])+' y '+periodoLabel(bim.periodos[1])+'.</p>' +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">INGRESOS (VENTAS)</div>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
+      filaFormHTML(28,"Por operaciones gravadas a la tarifa general",c28) +
+      filaFormHTML(35,"Por operaciones exentas/excluidas",c35) +
+      filaFormHTML(41,"Total ingresos brutos",c41) +
+      filaFormHTML(42,"Devoluciones en ventas anuladas, rescindidas o resueltas",c42) +
+      filaFormHTML(43,"Total ingresos netos recibidos durante el período",c43) +
+      filaFormHTML(67,"Total impuesto generado por operaciones gravadas",c67) +
+    '</tbody></table></div>' +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">COMPRAS (mercancía — excluye compras personales)</div>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
+      filaFormHTML(51,"De bienes gravados a la tarifa general (nacionales)",c51) +
+      filaFormHTML(54,"De bienes y servicios excluidos, exentos y no gravados",c54) +
+      filaFormHTML(55,"Total compras e importaciones brutas",c55) +
+      filaFormHTML(56,"Devoluciones en compras anuladas, rescindidas o resueltas en este período",c56) +
+      filaFormHTML(57,"Total compras netas realizadas durante el período",c57) +
+      filaFormHTML(72,"Por compras de bienes gravados a la tarifa general (impuesto descontable)",c72) +
+      filaFormHTML(81,"Total impuestos descontables",c81) +
+    '</tbody></table></div>' +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">LIQUIDACIÓN</div>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
+      (c82>0 ? filaFormHTML(82,"Saldo a pagar por el período fiscal",c82) : filaFormHTML(83,"Saldo a favor del período fiscal",c83)) +
+    '</tbody></table></div>' +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">Desglose mensual (referencia)</div>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th>Mes</th><th>IVA generado (67) − descontable (81)</th></tr></thead><tbody>' +
+      meses.map(function(m){return '<tr><td>'+esc(periodoLabel(m.periodo))+'</td><td>'+esc(m.label)+'</td></tr>';}).join("") +
+    '</tbody></table></div>' +
+    '<p class="small" style="margin-top:14px">No incluye importaciones, exportaciones, operaciones a 5%, retenciones de IVA ni saldos a favor de periodos anteriores — agrégalos manualmente al presentar si aplican para este cliente.</p>' +
+  '</div>';
+  return html;
+}
+
+function formulario350HTML(per){
+  var list = S.comprobantes.filter(function(c){ return c.periodo===per && c.tipo==="FC" && !/^Nota Crédito/.test(c.descripcion||""); });
+  var buckets = {arrPJ:{base:0,ret:0}, arrPN:{base:0,ret:0}, compPJ:{base:0,ret:0}, compPN:{base:0,ret:0}};
+  var sinClasificar = {base:0, ret:0, items:[]};
+  var reteIvaTotal = 0;
+  list.forEach(function(c){
+    var nombre = extractTercFromDescripcion(c.descripcion);
+    var tMatch = S.terceros.find(function(t){ return nombreCompletoTercero(t)===nombre; });
+    var lineaRet = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2365"; });
+    var lineaReteIva = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2367"; });
+    if(lineaReteIva) reteIvaTotal += Number(lineaReteIva.credito)||0;
+    if(!lineaRet) return;
+    var montoRet = Number(lineaRet.credito)||0;
+    var esArriendo = /arrendamientos/i.test(lineaRet.detalle||"");
+    var base = 0;
+    (c.lineas||[]).forEach(function(l){
+      var pre = (l.cuenta||"").slice(0,2);
+      if(pre==="14"||pre==="51"||pre==="52") base += Number(l.debito)||0;
+    });
+    if(!base) base = c.total_debito||0;
+    if(!tMatch){
+      sinClasificar.base+=base; sinClasificar.ret+=montoRet; sinClasificar.items.push(nombre);
+      return;
+    }
+    var key = (esArriendo?"arr":"comp") + (tMatch.es_juridica?"PJ":"PN");
+    buckets[key].base += base;
+    buckets[key].ret += montoRet;
+  });
+  var c33=buckets.arrPJ.base, c46=buckets.arrPJ.ret;
+  var c83=buckets.arrPN.base, c99=buckets.arrPN.ret;
+  var c36=buckets.compPJ.base, c49=buckets.compPJ.ret;
+  var c86=buckets.compPN.base, c102=buckets.compPN.ret;
+  var c130 = c46+c49+c99+c102;
+  var c131 = reteIvaTotal;
+  var c134 = c131;
+  var c136 = c130+c134;
+  var c138 = c136;
+
+  var alerta = sinClasificar.items.length ? ('<p class="small" style="color:var(--danger,#c0392b)">No se pudo clasificar el tercero (nombre en el comprobante no coincide con ningún tercero registrado) para: '+esc(Array.from(new Set(sinClasificar.items)).join(", "))+'. Base sin clasificar: '+fmtCOP(sinClasificar.base)+', retención: '+fmtCOP(sinClasificar.ret)+'. Revisa el nombre del tercero o regístralo.</p>') : "";
+
+  var html = '<div class="card card-pad">' +
+    '<div class="section-title">Declaración de Retención en la Fuente — Formulario 350 · '+esc(periodoLabel(per))+'</div>' +
+    '<p class="small">Mensual · Calculado a partir de los comprobantes de compra de '+esc(periodoLabel(per))+' (no incluye devoluciones).</p>' +
+    alerta +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">A título de renta — Compras</div>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla base</th><th class="num">Base</th><th style="text-align:center">Casilla ret.</th><th class="num">Retención</th></tr></thead><tbody>' +
+      '<tr><td>Compras — personas jurídicas</td><td class="mono" style="text-align:center">36</td><td class="num">'+fmtCOP(c36)+'</td><td class="mono" style="text-align:center">49</td><td class="num">'+fmtCOP(c49)+'</td></tr>' +
+      '<tr><td>Compras — personas naturales</td><td class="mono" style="text-align:center">86</td><td class="num">'+fmtCOP(c86)+'</td><td class="mono" style="text-align:center">102</td><td class="num">'+fmtCOP(c102)+'</td></tr>' +
+      '<tr><td>Arrendamientos — personas jurídicas</td><td class="mono" style="text-align:center">33</td><td class="num">'+fmtCOP(c33)+'</td><td class="mono" style="text-align:center">46</td><td class="num">'+fmtCOP(c46)+'</td></tr>' +
+      '<tr><td>Arrendamientos — personas naturales</td><td class="mono" style="text-align:center">83</td><td class="num">'+fmtCOP(c83)+'</td><td class="mono" style="text-align:center">99</td><td class="num">'+fmtCOP(c99)+'</td></tr>' +
+    '</tbody></table></div>' +
+    '<div class="small" style="font-weight:600;margin:16px 0 6px">Totales</div>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
+      filaFormHTML(130,"Total retenciones renta y complementario",c130) +
+      filaFormHTML(131,"Retenciones IVA practicadas a responsables",c131) +
+      filaFormHTML(134,"Total retenciones IVA",c134) +
+      filaFormHTML(136,"Total retenciones",c136) +
+      filaFormHTML(138,"Total retenciones más sanciones",c138) +
+    '</tbody></table></div>' +
+    '<p class="small" style="margin-top:14px">No incluye honorarios, comisiones, servicios, rendimientos financieros ni pagos al exterior — Cuadre hoy solo calcula retención automática por compras y arrendamientos. Si el cliente tiene otros conceptos, decláralos aparte.</p>' +
+  '</div>';
   return html;
 }
 
@@ -1809,6 +1978,7 @@ function nuevoComprobanteModal(){
 window.app = {
   setTab: function(t){ S.tab=t; render(); },
   setLibroSub: function(t){ S.libroSub=t; render(); },
+  setFormSub: function(t){ S.formSub=t; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
   backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
