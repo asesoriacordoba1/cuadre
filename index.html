@@ -1105,6 +1105,32 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
 }
+function rebuildDevolucionCompra(r, conRetencion){
+  var total = r.total, iva = Number(r.iva)||0;
+  var baseGravada = iva>0 ? (iva/19*100) : 0;
+  var baseExenta = total-iva-baseGravada;
+  if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
+  var lineas = [];
+  if(baseGravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"(NC) Mercancía gravada 19% "+r.tercNombre, debito:0, credito:baseGravada});
+  if(baseExenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"(NC) Mercancía exenta/excluida "+r.tercNombre, debito:0, credito:baseExenta});
+  if(baseGravada<=0 && baseExenta<=0 && total-iva>0) lineas.push({cuenta:"1435", tercero:"", detalle:"(NC) Mercancía "+r.tercNombre, debito:0, credito: total-iva});
+  if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"(NC) IVA descontable", debito:0, credito:iva});
+  var retAjuste = 0;
+  if(conRetencion){
+    var tMatch = S.terceros.find(function(t){ return t.identificacion && normDigits(t.identificacion)===normDigits(r.tercIdent||""); });
+    if(!tMatch || (tMatch.concepto_retencion!=="compras" && tMatch.concepto_retencion!=="arrendamientos")){
+      alert("Este proveedor no tiene configurado un Concepto de retención (compras/arrendamientos) en Terceros, así que no puedo calcular el ajuste. Configúralo primero si este proveedor sí tiene retención.");
+      return null;
+    }
+    var cfg = S.config || {tasa_compras:2.5, tasa_arrendamientos:3.5};
+    var tasa = tMatch.concepto_retencion==="compras" ? cfg.tasa_compras : cfg.tasa_arrendamientos;
+    var baseRet = total-iva;
+    retAjuste = Math.round(baseRet*tasa/100);
+    if(retAjuste>0) lineas.push({cuenta:"2365", tercero:"", detalle:"(NC) Ajuste retención en la fuente ("+tasa+"%) - "+r.tercNombre, debito:retAjuste, credito:0});
+  }
+  lineas.push({cuenta:"2205", tercero:"", detalle:"(NC) Proveedor "+r.tercNombre, debito: total-retAjuste, credito:0});
+  return lineas;
+}
 function handleImportFile(file){
   S.importBusy=true; S.importErr=""; S.importRows=null; render();
   var reader = new FileReader();
@@ -1929,7 +1955,7 @@ function formulario300HTML(per){
 }
 
 function formulario350HTML(per){
-  var list = S.comprobantes.filter(function(c){ return c.periodo===per && c.tipo==="FC" && !/^Nota Crédito/.test(c.descripcion||""); });
+  var list = S.comprobantes.filter(function(c){ return c.periodo===per && c.tipo==="FC"; });
   var buckets = {arrPJ:{base:0,ret:0}, arrPN:{base:0,ret:0}, compPJ:{base:0,ret:0}, compPN:{base:0,ret:0}};
   var sinClasificar = {base:0, ret:0, items:[]};
   var reteIvaTotal = 0;
@@ -2123,16 +2149,15 @@ function importarHTML(e){
       else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
       var ncToggle = "";
       if(r.esNC && !r.esVenta && !r.dup){
-        if(r.esDescuentoConRetencion){
-          ncToggle = '<span class="chip chip-good" style="margin-left:4px">Descuento condicionado (afecta retención)</span> <a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>';
-        } else if(r.esDescuentoCondicionado){
-          ncToggle = '<span class="chip chip-good" style="margin-left:4px">Descuento condicionado</span> ' +
-            '<a class="link" onclick="app.marcarDescuentoConRetencion('+i+')">¿también afecta la retención?</a> ' +
-            '<a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>';
-        } else {
-          ncToggle = '<a class="link" style="margin-left:4px" onclick="app.marcarDescuentoCondicionado('+i+')">¿Es descuento condicionado?</a> ' +
-            '<a class="link" onclick="app.marcarDescuentoConRetencion('+i+')">¿y afecta la retención?</a>';
-        }
+        var estado = r.esNCEstado||"";
+        var chipTxt = {descuento:"Descuento condicionado", sin_retencion:"Devolución sin retención", con_retencion:"Devolución — afecta retención"}[estado];
+        var chip = chipTxt ? '<span class="chip chip-good" style="margin-left:4px">'+chipTxt+'</span> ' : "";
+        var links = [];
+        if(estado!=="descuento") links.push('<a class="link" onclick="app.marcarDescuentoCondicionado('+i+')">Descuento condicionado</a>');
+        if(estado!=="sin_retencion") links.push('<a class="link" onclick="app.marcarDevolucionSinRetencion('+i+')">Devolución de mercancía (sin factura)</a>');
+        if(estado!=="con_retencion") links.push('<a class="link" onclick="app.marcarAfectaRetencion('+i+')">Afecta factura con retención</a>');
+        if(estado) links.push('<a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>');
+        ncToggle = chip + links.join(' · ');
       }
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
@@ -2146,7 +2171,7 @@ function importarHTML(e){
     body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
       '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos?"":"disabled")+'>Importar seleccionados</button></div>' +
       '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th class="num">Total</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
-      '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución (afectan una factura) — si en realidad es un descuento comercial condicionado, márcalo con el enlace junto al tercero para que se contabilice contra 421330 en vez de reversar la mercancía/IVA.</p>';
+      '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución de mercancía (según lo que traiga el archivo). La DIAN no indica si una nota crédito es descuento condicionado, devolución sin factura, o afecta la retención de una factura — revísalas una por una y marca la que corresponda con los enlaces junto al tercero.</p>';
   }
 
   body += '<div class="card card-pad" style="margin-top:18px">' +
@@ -2479,49 +2504,45 @@ window.app = {
   marcarDescuentoCondicionado: function(i){
     var r = S.importRows && S.importRows[i];
     if(!r) return;
-    if(!r.esDescuentoCondicionado){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
+    if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
     r.lineas = [
       {cuenta:"421330", tercero:"", detalle:"Descuento comercial condicionado - "+r.tercNombre, debito:0, credito:r.total},
       {cuenta:"220501", tercero:"", detalle:"Proveedor "+r.tercNombre+" - descuento condicionado", debito:r.total, credito:0}
     ];
     r.descripcion = r._descripcionOriginal.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
-    r.esDescuentoCondicionado = true;
-    r.esDescuentoConRetencion = false;
+    r.esNCEstado = "descuento";
     r.debeCuadra = true;
     render();
   },
-  marcarDescuentoConRetencion: function(i){
+  marcarDevolucionSinRetencion: function(i){
     var r = S.importRows && S.importRows[i];
     if(!r) return;
-    var tMatch = S.terceros.find(function(t){ return t.identificacion && normDigits(t.identificacion)===normDigits(r.tercIdent||""); });
-    if(!tMatch || (tMatch.concepto_retencion!=="compras" && tMatch.concepto_retencion!=="arrendamientos")){
-      alert("Este proveedor no tiene configurado un Concepto de retención (compras/arrendamientos) en Terceros, así que no puedo calcular cuánto ajustar. Configúralo primero si este proveedor sí tiene retención.");
-      return;
-    }
-    if(!r.esDescuentoCondicionado){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
-    var cfg = S.config || {tasa_compras:2.5, tasa_arrendamientos:3.5};
-    var tasa = tMatch.concepto_retencion==="compras" ? cfg.tasa_compras : cfg.tasa_arrendamientos;
-    var ivaNC = Number(r.iva)||0;
-    var baseNC = r.total - ivaNC;
-    var retAjuste = Math.round(baseNC * tasa/100);
-    var neto = r.total - retAjuste;
-    r.lineas = [
-      {cuenta:"421330", tercero:"", detalle:"Descuento comercial condicionado - "+r.tercNombre, debito:0, credito:r.total},
-      {cuenta:"2365", tercero:"", detalle:"Ajuste retención en la fuente por descuento ("+tasa+"%) - "+r.tercNombre, debito:retAjuste, credito:0},
-      {cuenta:"220501", tercero:"", detalle:"Proveedor "+r.tercNombre+" - descuento condicionado (neto de retención)", debito:neto, credito:0}
-    ];
-    r.descripcion = r._descripcionOriginal.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
-    r.esDescuentoCondicionado = true;
-    r.esDescuentoConRetencion = true;
+    if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
+    var lineas = rebuildDevolucionCompra(r, false);
+    if(!lineas) return;
+    r.lineas = lineas;
+    r.descripcion = r._descripcionOriginal;
+    r.esNCEstado = "sin_retencion";
+    r.debeCuadra = true;
+    render();
+  },
+  marcarAfectaRetencion: function(i){
+    var r = S.importRows && S.importRows[i];
+    if(!r) return;
+    var lineas = rebuildDevolucionCompra(r, true);
+    if(!lineas) return;
+    if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
+    r.lineas = lineas;
+    r.descripcion = r._descripcionOriginal;
+    r.esNCEstado = "con_retencion";
     r.debeCuadra = true;
     render();
   },
   marcarAfectaFactura: function(i){
     var r = S.importRows && S.importRows[i];
-    if(!r || !r.esDescuentoCondicionado) return;
+    if(!r || !r._lineasOriginal) return;
     r.lineas = r._lineasOriginal; r.descripcion = r._descripcionOriginal;
-    r.esDescuentoCondicionado = false;
-    r.esDescuentoConRetencion = false;
+    r.esNCEstado = "";
     var tot = totalsOf(r.lineas);
     r.debeCuadra = Math.abs(tot.d-tot.c)<1;
     render();
