@@ -315,6 +315,7 @@ var S = {
   importProgress:null,
   cleanupGroups:null,
   cleanupBusy:false,
+  docSoporteCandidatos:null,
   config:null,
   tercImportRows:null,
   tercImportFileName:"",
@@ -1354,6 +1355,28 @@ function terceroPorNombre(nombre){
   if(!norm) return null;
   return S.terceros.find(function(t){ return normNombre(t.nombre)===norm; }) ||
     S.terceros.find(function(t){ return normNombre(t.nombre_comercial)===norm; });
+}
+function analizarDocSoporte(){
+  var grupos = gruposTercerosPorNit();
+  var nitCompraConfig = {};
+  grupos.forEach(function(g){
+    var tieneCompra = g.terceros.some(function(t){ return !!(t.concepto_retencion||"").trim(); });
+    if(tieneCompra) nitCompraConfig[g.nit] = g;
+  });
+  var candidatos = [];
+  S.comprobantes.forEach(function(c){
+    if(c.tipo!=="FV") return;
+    if(/^Nota/.test(c.descripcion||"")) return;
+    var nombreDoc = normNombre(extractTercFromDescripcion(c.descripcion));
+    if(!nombreDoc) return;
+    var grupo = grupos.find(function(g){ return g.variantes.indexOf(nombreDoc)>=0; });
+    if(grupo && nitCompraConfig[grupo.nit]){
+      var conceptos = grupo.terceros.filter(function(t){return t.concepto_retencion;}).map(function(t){return CONCEPTO_LABELS[t.concepto_retencion]||t.concepto_retencion;}).join(", ");
+      candidatos.push({id:c._id, periodo:c.periodo, descripcion:c.descripcion, total:c.total_debito, nit:grupo.nit, tercero:grupo.label, conceptos:conceptos});
+    }
+  });
+  S.docSoporteCandidatos = candidatos;
+  render();
 }
 function analizarCompras(){
   var map = {};
@@ -2402,6 +2425,24 @@ function importarHTML(e){
     }
   }
   body += '</div>';
+
+  body += '<div class="card card-pad" style="margin-top:18px">' +
+    '<div class="section-title">3. Revisar Documentos Soporte mal clasificados</div>' +
+    '<p class="small" style="margin-bottom:12px">Busca facturas de venta ya guardadas cuyo tercero también está configurado con un concepto de retención de compra (arrendamientos, compras, etc.) — la señal de que puede ser en realidad un Documento Soporte (una compra) que quedó registrado como venta.</p>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.analizarDocSoporte()">Buscar candidatos</button>';
+  if(S.docSoporteCandidatos){
+    if(!S.docSoporteCandidatos.length){
+      body += '<p class="small" style="margin-top:10px">No se encontraron facturas de venta con estas señales.</p>';
+    } else {
+      var rowsDS = S.docSoporteCandidatos.map(function(d){
+        return '<tr><td class="mono acct-code">'+d.id+'</td><td>'+periodoLabel(d.periodo)+'</td><td>'+esc(d.tercero)+'</td><td>'+esc(d.conceptos)+'</td><td class="num">'+fmtCOP(d.total)+'</td>' +
+          '<td><a class="link" onclick="app.verComprobante(\''+d.id+'\')">Ver</a></td></tr>';
+      }).join("");
+      body += '<p class="small" style="margin-top:10px">'+S.docSoporteCandidatos.length+' factura(s) de venta con esta señal. Revísalas una por una — no todas son necesariamente Documento Soporte, puede que ese tercero de verdad te haya comprado algo aparte. Dime cuáles sí lo son y las reclasifico a Compra.</p>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Tercero</th><th>Concepto de retención configurado</th><th class="num">Total</th><th></th></tr></thead><tbody>'+rowsDS+'</tbody></table></div>';
+    }
+  }
+  body += '</div>';
   return body;
 }
 
@@ -2767,6 +2808,7 @@ window.app = {
   confirmImport: confirmImport,
 
   analizarCompras: analizarCompras,
+  analizarDocSoporte: analizarDocSoporte,
   toggleCleanupGroup: function(i,val){ S.cleanupGroups[i].checked = val; render(); },
   eliminarGruposSeleccionados: eliminarGruposSeleccionados
 };
