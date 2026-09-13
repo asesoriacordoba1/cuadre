@@ -1062,16 +1062,20 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
       if(baseC.gravada<=0 && baseC.exenta<=0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+      if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     } else if(tMatch && CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion]){
-      lineas.push({cuenta:CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion], tercero:"", detalle:conceptoGasto+" "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+      lineas.push({cuenta:CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion], tercero:"", detalle:conceptoGasto+" "+tercNombre+" - "+docRef+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     } else if(conceptoGasto){
-      lineas.push({cuenta:"5195", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+      lineas.push({cuenta:"5195", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)"+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     } else {
-      lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
+      lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)"+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     }
-    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     var pagoProveedor = total-reteIva-reteRenta-reteIca;
-    lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
+    if(esMercancia){
+      lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
+    } else {
+      lineas.push({cuenta:"110505", tercero:"", detalle:"Caja "+tercNombre+" - "+docRef+" (diverso)", debito:0, credito:pagoProveedor});
+    }
     if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
     if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
     if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
