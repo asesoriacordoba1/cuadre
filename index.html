@@ -999,9 +999,16 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
   var esND = !esNC && /d[eé]bito/i.test(tipoDocRaw);
-  var esVenta = nitMatches(row["NIT Emisor"], empresa.nit);
-  var esCompra = !esVenta && nitMatches(row["NIT Receptor"], empresa.nit);
-  if(!esVenta && !esCompra) return null;
+  var esDocSoporte = /documento\s*soporte/i.test(tipoDocRaw);
+  var empresaEsEmisor = nitMatches(row["NIT Emisor"], empresa.nit);
+  var empresaEsReceptor = !empresaEsEmisor && nitMatches(row["NIT Receptor"], empresa.nit);
+  if(!empresaEsEmisor && !empresaEsReceptor) return null;
+  // El Documento Soporte lo emite la propia empresa (NIT Emisor = empresa) aunque
+  // económicamente es una compra a alguien no obligado a facturar (ej. arriendo a
+  // una persona natural) -- por eso se trata como compra aunque la empresa figure
+  // como emisora, y la contraparte real sigue viniendo de los campos "Receptor".
+  var esVenta = empresaEsEmisor && !esDocSoporte;
+  var esCompra = !esVenta;
 
   var total = Number(row["Total"])||0;
   if(total<=0) return null;
@@ -1012,12 +1019,12 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   var fecha = excelDateToISO(row["Fecha Emisión"]);
   if(!fecha) return {_error:"fecha", raw: row["Fecha Emisión"]};
   var cufe = row["CUFE/CUDE"]||"";
-  var tercNombre = esVenta ? (row["Nombre Receptor"]||"") : (row["Nombre Emisor"]||"");
-  var tercIdent = String(esVenta ? (row["NIT Receptor"]||"") : (row["NIT Emisor"]||"")).trim();
+  var tercNombre = empresaEsEmisor ? (row["Nombre Receptor"]||"") : (row["Nombre Emisor"]||"");
+  var tercIdent = String(empresaEsEmisor ? (row["NIT Receptor"]||"") : (row["NIT Emisor"]||"")).trim();
   var docRef = (row["Prefijo"]||"")+""+(row["Folio"]||"");
 
   var retNota = "";
-  var tMatch = (terceros||[]).find(function(t){ return nitMatches(esVenta?row["NIT Receptor"]:row["NIT Emisor"], t.identificacion); });
+  var tMatch = (terceros||[]).find(function(t){ return nitMatches(empresaEsEmisor?row["NIT Receptor"]:row["NIT Emisor"], t.identificacion); });
   if(esCompra && tMatch && config){
     if(tMatch.autorretenedor){ reteRenta = 0; retNota = " (O-15/O-47, sin retención)"; }
     else if(tMatch.concepto_retencion==="compras" || tMatch.concepto_retencion==="arrendamientos"){
