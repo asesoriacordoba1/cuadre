@@ -964,6 +964,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   if(!fecha) return {_error:"fecha", raw: row["Fecha Emisión"]};
   var cufe = row["CUFE/CUDE"]||"";
   var tercNombre = esVenta ? (row["Nombre Receptor"]||"") : (row["Nombre Emisor"]||"");
+  var tercIdent = String(esVenta ? (row["NIT Receptor"]||"") : (row["NIT Emisor"]||"")).trim();
   var docRef = (row["Prefijo"]||"")+""+(row["Folio"]||"");
 
   var retNota = "";
@@ -1091,6 +1092,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     lineas: lineas,
     cufe: cufe,
     tercNombre: tercNombre,
+    tercIdent: tercIdent,
+    tercConocido: !!tMatch,
     total: total,
     esVenta: esVenta,
     esNC: esNC,
@@ -1144,6 +1147,26 @@ async function confirmImport(){
   var rows = (S.importRows||[]).filter(function(r){return r.include && r.debeCuadra;});
   if(!rows.length){ alert("No hay filas seleccionadas para importar."); return; }
   S.importBusy=true; render();
+
+  var nuevosMap = {};
+  rows.forEach(function(r){
+    if(r.tercConocido || !r.tercIdent) return;
+    var key = normDigits(r.tercIdent);
+    if(!key || nuevosMap[key]) return;
+    nuevosMap[key] = {empresa_id:S.empresaId, nombre:r.tercNombre, identificacion:r.tercIdent, tipo:(r.esVenta?"cliente":"otro"),
+      es_juridica:true, razon_social:r.tercNombre, tipo_documento:"31", pais:"Colombia"};
+  });
+  var nuevos = Object.keys(nuevosMap).map(function(k){return nuevosMap[k];});
+  var nuevosClientes=0, nuevosOtros=0;
+  if(nuevos.length){
+    var resT = await sb.from("terceros").insert(nuevos).select();
+    if(resT.error){
+      alert("No se pudieron registrar automáticamente los terceros nuevos: "+resT.error.message+". Se importarán los comprobantes igual, pero revisa Terceros después.");
+    } else {
+      (resT.data||[]).forEach(function(t){ S.terceros.push(t); if(t.tipo==="cliente") nuevosClientes++; else nuevosOtros++; });
+    }
+  }
+
   var counters={};
   function nextNum(tipo,periodo){
     var key=tipo+"|"+periodo;
@@ -1179,7 +1202,10 @@ async function confirmImport(){
   var n=toInsert.length;
   S.importRows=null; S.importFileName="";
   render();
-  alert("Se importaron "+n+" comprobantes. Revísalos en la pestaña Comprobantes (las compras traen una cuenta de gasto genérica que puedes reclasificar).");
+  var msg = "Se importaron "+n+" comprobantes.";
+  if(nuevosClientes||nuevosOtros) msg += " Se registraron "+(nuevosClientes+nuevosOtros)+" terceros nuevos en Terceros ("+nuevosClientes+" como Cliente, "+nuevosOtros+" como Otro/Diversos) — revísalos y reclasifícalos si hace falta.";
+  msg += " Revísalos en la pestaña Comprobantes (las compras traen una cuenta de gasto genérica que puedes reclasificar).";
+  alert(msg);
 }
 
 /* ---------- limpieza de compras ya importadas ---------- */
@@ -2069,7 +2095,7 @@ function periodosHTML(e){
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
-    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor esté registrado en <a class="link" onclick="app.setTab(\'terceros\')">Terceros</a> con Tipo <b>proveedor</b> se clasifican como compra de mercancía. Las que estén registradas con Tipo <b>personal</b> se marcan de una vez como gasto personal y quedan desmarcadas para que no las importes por accidente. Cualquier otro NIT (no registrado, o registrado como cliente/empleado/otro) se marca como <b>Diverso</b> — no significa que sea personal, solo que falta clasificar — y se importa igual en la cuenta genérica (5195) para que lo revises después en Comprobantes.</p>' +
+    '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor esté registrado en <a class="link" onclick="app.setTab(\'terceros\')">Terceros</a> con Tipo <b>proveedor</b> se clasifican como compra de mercancía. Las que estén registradas con Tipo <b>personal</b> se marcan de una vez como gasto personal y quedan desmarcadas para que no las importes por accidente. Cualquier otro NIT (no registrado, o registrado como cliente/empleado/otro) se marca como <b>Diverso</b> — no significa que sea personal, solo que falta clasificar — y se importa igual en la cuenta genérica (5195) para que lo revises después en Comprobantes. Al confirmar la importación, los NIT de clientes y proveedores que no existan todavía en Terceros se registran automáticamente ahí: los de ventas como <b>Cliente</b>, los de compras como <b>Otro</b> (Diversos) — revísalos y reclasifícalos si hace falta.</p>' +
     '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
