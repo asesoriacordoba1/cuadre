@@ -668,7 +668,7 @@ async function eliminarTercero(id){
 }
 
 /* ---------- importar terceros masivo ---------- */
-var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos)"];
+var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/diversos)"];
 function descargarPlantillaTerceros(){
   var data = [
     TERC_HEADERS,
@@ -709,8 +709,9 @@ function handleTercerosImportFile(file){
         var tipo = String(row["Tipo"]||"proveedor").trim().toLowerCase();
         if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
         var sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
-        var conc = String(row["Concepto retención (compras/arrendamientos)"]||"").trim().toLowerCase();
-        if(conc!=="compras" && conc!=="arrendamientos") conc="";
+        var conc = String(row["Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/diversos)"]||"").trim().toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
+        if(["compras","arrendamientos","servicios_publicos","fletes","seguros","diversos"].indexOf(conc)<0) conc="";
         var dup = !!(ident && existing[normDigits(ident)]);
         rows.push({nombre:nombre, es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2,
           tipo_documento:tipoDoc, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc,
@@ -924,6 +925,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       reteRenta = base >= config.base_minima ? Math.round(base * tasa / 100) : 0;
       retNota = " ("+tMatch.concepto_retencion+" "+tasa+"%)";
     }
+    else if(CONCEPTOS_SIN_RETENCION.indexOf(tMatch.concepto_retencion)>=0){ reteRenta = 0; }
   }
 
   function splitGravadaExenta(){
@@ -945,12 +947,15 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
     if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
   } else {
-    var esMercancia = tMatch && tMatch.tipo==="proveedor";
+    var conceptoGasto = tMatch && CONCEPTO_LABELS[tMatch.concepto_retencion];
+    var esMercancia = tMatch && tMatch.tipo==="proveedor" && !conceptoGasto;
     if(esMercancia){
       var baseC = splitGravadaExenta();
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
       if(baseC.gravada<=0 && baseC.exenta<=0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+    } else if(conceptoGasto){
+      lineas.push({cuenta:"5195", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
     } else {
       lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)", debito: total-iva, credito:0});
     }
@@ -965,7 +970,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   var porReglas = false;
   if(reglas && reglas.length){
     var documentoKey = esVenta ? (esNC?"Devolucion en Ventas":"Factura de Venta") :
-      (esNC ? "Devolucion en Compras" : ((tMatch&&tMatch.concepto_retencion==="arrendamientos")?"Gasto Arriendo":"Factura de Compra"));
+      (esNC ? "Devolucion en Compras" : ((tMatch && CONCEPTO_DOC_KEYS[tMatch.concepto_retencion]) || "Factura de Compra"));
     var regimenBuscado = tMatch?tMatch.regimen:"";
     var matches = reglas.filter(function(r){ return r.documento===documentoKey; });
     var exact = regimenBuscado ? matches.filter(function(r){ return r.regimen===regimenBuscado; }) : [];
@@ -1433,6 +1438,7 @@ function retencionLabel(t){
   if(t.autorretenedor) return '<span class="chip chip-good"><span class="chip-dot"></span>Sin retención (O-15/O-47)</span>';
   if(t.concepto_retencion==="compras") return '<span class="chip chip-warn">Compras 2.5%</span>';
   if(t.concepto_retencion==="arrendamientos") return '<span class="chip chip-warn">Arrendamientos 3.5%</span>';
+  if(CONCEPTO_LABELS[t.concepto_retencion]) return '<span class="chip">'+esc(CONCEPTO_LABELS[t.concepto_retencion])+' (sin retención)</span>';
   return '<span class="small">—</span>';
 }
 function ajustesRetencionHTML(){
@@ -1479,7 +1485,7 @@ function tercerosHTML(e){
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' onchange="app.toggleTercImportRow('+i+',this.checked)"></td>' +
         '<td>'+esc(r.nombre)+'</td><td class="mono">'+esc(r.identificacion)+'</td><td>'+cap(r.tipo)+'</td>' +
-        '<td>'+(r.autorretenedor?'Sin retención':(r.concepto_retencion||"—"))+'</td><td>'+flag+'</td>' +
+        '<td>'+(r.autorretenedor?'Sin retención':(CONCEPTO_LABELS[r.concepto_retencion]||r.concepto_retencion||"—"))+'</td><td>'+flag+'</td>' +
       '</tr>';
     }).join("");
     body += '<div class="card card-pad" style="margin-top:16px">' +
@@ -1969,6 +1975,18 @@ function nuevaEmpresaModal(){
 var pendingNiif=2;
 
 var REGIMENES = ["","Persona Jurídica","Gran Contribuyente","Persona Natural Responsable de IVA","Persona Natural No Responsable de IVA","Regimen simple de tributacion"];
+var CONCEPTOS_RETENCION = [
+  ["","Ninguno"],
+  ["compras","Compras (2.5%)"],
+  ["arrendamientos","Arrendamientos (3.5%)"],
+  ["servicios_publicos","Servicios públicos (sin retención)"],
+  ["fletes","Fletes / transporte de carga (sin retención)"],
+  ["seguros","Seguros (sin retención)"],
+  ["diversos","Diversos (sin retención)"]
+];
+var CONCEPTO_LABELS = {arrendamientos:"Arrendamiento", servicios_publicos:"Servicios públicos", fletes:"Fletes", seguros:"Seguros", diversos:"Diversos"};
+var CONCEPTO_DOC_KEYS = {arrendamientos:"Gasto Arriendo", servicios_publicos:"Gasto Servicios Públicos", fletes:"Gasto Fletes", seguros:"Gasto Seguros", diversos:"Gasto Diversos"};
+var CONCEPTOS_SIN_RETENCION = ["servicios_publicos","fletes","seguros","diversos"];
 var DIAN_DOC_TYPES = [
   ["11","Registro civil de nacimiento"],["12","Tarjeta de identidad"],["13","Cédula de ciudadanía"],
   ["14","Certificado Registraduría (sucesión ilíquida sin doc.)"],["15","Doc. sucesión ilíquida (notaría/juzgado)"],
@@ -2006,7 +2024,7 @@ function nuevoTerceroModal(){
     '<div class="field" style="background:var(--surface-2);border-radius:8px;padding:10px;margin-top:2px">' +
       '<label style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><input type="checkbox" id="t-autorretenedor" style="width:auto"'+(t.autorretenedor?" checked":"")+'> No se le practica retención (responsabilidad O-15 Autorretenedor u O-47 Régimen Simple)</label>' +
       '<label>Concepto de retención (si no es autorretenedor)</label>' +
-      '<select id="t-concepto"><option value=""'+selOpt("",t.concepto_retencion||"")+'>Ninguno</option><option value="compras"'+selOpt("compras",t.concepto_retencion||"")+'>Compras (2.5%)</option><option value="arrendamientos"'+selOpt("arrendamientos",t.concepto_retencion||"")+'>Arrendamientos (3.5%)</option></select>' +
+      '<select id="t-concepto">'+CONCEPTOS_RETENCION.map(function(cr){return '<option value="'+cr[0]+'"'+selOpt(cr[0],t.concepto_retencion||"")+'>'+cr[1]+'</option>';}).join("")+'</select>' +
     '</div>' +
   '</div><div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitTercero()">Guardar</button></div></div></div>';
 }
