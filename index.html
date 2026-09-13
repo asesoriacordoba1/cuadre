@@ -1528,16 +1528,43 @@ function comprobanteMensualHTML(per){
   var list = S.comprobantes.filter(function(c){return c.periodo===per;});
   if(!list.length) return '<div class="card card-pad"><p class="small">Sin comprobantes en '+periodoLabel(per)+'.</p></div>';
   var DEVOL_LABELS = {FV:"Devolución en Ventas", FC:"Devolución en Compras"};
+  var SPLIT_CODES = { FV:{gravada:"413501", exenta:"413590"}, FC:{gravada:"143501", exenta:"143590"} };
   var bloques={};
+  var agg={};
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"") && DEVOL_LABELS[c.tipo];
     var key = esDevol ? (c.tipo+"_NC") : c.tipo;
     if(!bloques[key]) bloques[key]={};
+    var sc = SPLIT_CODES[c.tipo];
+    if(sc && !agg[key]) agg[key]={iva:0, main:0};
     (c.lineas||[]).forEach(function(l){
-      if(!bloques[key][l.cuenta]) bloques[key][l.cuenta]={d:0,c:0};
-      bloques[key][l.cuenta].d += Number(l.debito)||0;
-      bloques[key][l.cuenta].c += Number(l.credito)||0;
+      var cuenta = l.cuenta||"";
+      var monto = (Number(l.debito)||0) + (Number(l.credito)||0);
+      if(sc){
+        if(cuenta.slice(0,4)==="2408") agg[key].iva += monto;
+        else {
+          var esMain = c.tipo==="FV" ? cuenta[0]==="4" : cuenta.slice(0,2)==="14";
+          if(esMain){ agg[key].main += monto; return; }
+        }
+      }
+      if(!bloques[key][cuenta]) bloques[key][cuenta]={d:0,c:0};
+      bloques[key][cuenta].d += Number(l.debito)||0;
+      bloques[key][cuenta].c += Number(l.credito)||0;
     });
+  });
+  Object.keys(agg).forEach(function(key){
+    var tipoBase = key.replace(/_NC$/,"");
+    var sc = SPLIT_CODES[tipoBase];
+    var a = agg[key];
+    if(a.main===0) return;
+    var gravada = a.iva>0 ? (a.iva/19*100) : 0;
+    var exenta = a.main - gravada;
+    var isDevolKey = /_NC$/.test(key);
+    var lado = tipoBase==="FV" ? (isDevolKey?"d":"c") : (isDevolKey?"c":"d");
+    if(!bloques[key][sc.gravada]) bloques[key][sc.gravada]={d:0,c:0};
+    if(!bloques[key][sc.exenta]) bloques[key][sc.exenta]={d:0,c:0};
+    bloques[key][sc.gravada][lado] += gravada;
+    bloques[key][sc.exenta][lado] += exenta;
   });
   var orden = ["FV","FV_NC","FC","FC_NC","RC","CE","NC","NM"];
   var claves = Object.keys(bloques).sort(function(a,b){
@@ -1575,49 +1602,54 @@ function comprobanteMensualHTML(per){
 function filaFormHTML(casilla, concepto, valor){
   return '<tr><td>'+esc(concepto)+'</td><td class="mono" style="text-align:center">'+casilla+'</td><td class="num">'+fmtCOP(valor)+'</td></tr>';
 }
-function splitVentaCompra(c){
+function ivaMainDe(c){
   var iva=0, main=0;
   (c.lineas||[]).forEach(function(l){
     var cuenta = l.cuenta||"";
     var monto = (Number(l.debito)||0) + (Number(l.credito)||0);
     if(cuenta.slice(0,4)==="2408"){ iva += monto; }
     else if(c.tipo==="FV" && cuenta[0]==="4"){ main += monto; }
-    else if(c.tipo==="FC" && (cuenta.slice(0,2)==="14"||cuenta.slice(0,2)==="51"||cuenta.slice(0,2)==="52")){ main += monto; }
+    else if(c.tipo==="FC" && cuenta.slice(0,2)==="14"){ main += monto; }
   });
-  var gravada = iva>0 ? (iva/19*100) : 0;
-  var exenta = main - gravada;
-  if(exenta<0){ gravada = main; exenta = 0; }
+  return {iva:iva, main:main};
+}
+function gravadaExentaDe(agg){
+  var gravada = agg.iva>0 ? (agg.iva/19*100) : 0;
+  var exenta = agg.main - gravada;
+  if(exenta<0){ gravada = agg.main; exenta = 0; }
   else if(Math.abs(exenta)<1) exenta=0;
-  return {iva:iva, gravada:gravada, exenta:exenta};
+  return {gravada:gravada, exenta:exenta};
 }
 function formulario300HTML(per){
   var bim = bimestreDePeriodo(per);
   var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
 
-  var vN={gravada:0,exenta:0,iva:0}, vD={gravada:0,exenta:0,iva:0};
-  var cN={gravada:0,exenta:0,iva:0}, cD={gravada:0,exenta:0,iva:0};
+  var vN={main:0,iva:0}, vD={main:0,iva:0};
+  var cN={main:0,iva:0}, cD={main:0,iva:0};
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"");
     var esPersonal = /\[(personal|diverso)\]/.test(c.descripcion||"");
     if(c.tipo==="FV"){
-      var s = splitVentaCompra(c);
+      var s = ivaMainDe(c);
       var b = esDevol?vD:vN;
-      b.gravada+=s.gravada; b.exenta+=s.exenta; b.iva+=s.iva;
+      b.main+=s.main; b.iva+=s.iva;
     } else if(c.tipo==="FC" && !esPersonal){
-      var s2 = splitVentaCompra(c);
+      var s2 = ivaMainDe(c);
       var b2 = esDevol?cD:cN;
-      b2.gravada+=s2.gravada; b2.exenta+=s2.exenta; b2.iva+=s2.iva;
+      b2.main+=s2.main; b2.iva+=s2.iva;
     }
   });
-  var c28=vN.gravada, c35=vN.exenta;
+  var vNs=gravadaExentaDe(vN), vDs=gravadaExentaDe(vD);
+  var cNs=gravadaExentaDe(cN), cDs=gravadaExentaDe(cD);
+  var c28=vNs.gravada, c35=vNs.exenta;
   var c41=c28+c35;
-  var c42=vD.gravada+vD.exenta;
+  var c42=vDs.gravada+vDs.exenta;
   var c43=c41-c42;
   var c67=vN.iva-vD.iva;
 
-  var c51=cN.gravada, c54=cN.exenta;
+  var c51=cNs.gravada, c54=cNs.exenta;
   var c55=c51+c54;
-  var c56=cD.gravada+cD.exenta;
+  var c56=cDs.gravada+cDs.exenta;
   var c57=c55-c56;
   var c72=cN.iva-cD.iva;
   var c81=c72;
@@ -1631,7 +1663,7 @@ function formulario300HTML(per){
     listaMes.forEach(function(c){
       var devol=/^Nota Crédito/.test(c.descripcion||"");
       var esPersonal=/\[(personal|diverso)\]/.test(c.descripcion||"");
-      var s = (c.tipo==="FV"||c.tipo==="FC") ? splitVentaCompra(c) : null;
+      var s = (c.tipo==="FV"||c.tipo==="FC") ? ivaMainDe(c) : null;
       if(!s) return;
       if(c.tipo==="FV") gen += devol ? -s.iva : s.iva;
       else if(c.tipo==="FC" && !esPersonal) desc += devol ? -s.iva : s.iva;
