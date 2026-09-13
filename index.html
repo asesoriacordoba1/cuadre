@@ -1318,6 +1318,29 @@ function normNombre(s){
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .replace(/\s+/g," ");
 }
+function gruposTercerosPorNit(){
+  var byNit = {};
+  S.terceros.forEach(function(t){
+    var nit = normNit(t.identificacion);
+    if(!nit) return;
+    if(!byNit[nit]) byNit[nit] = [];
+    byNit[nit].push(t);
+  });
+  return Object.keys(byNit).map(function(nit){
+    var terceros = byNit[nit];
+    var preferido = terceros.find(function(t){ return t.tipo && t.tipo!=="cliente" && t.tipo!=="otro"; }) || terceros[0];
+    var variantes = {};
+    terceros.forEach(function(t){
+      if(t.nombre) variantes[normNombre(t.nombre)] = true;
+      if(t.nombre_comercial) variantes[normNombre(t.nombre_comercial)] = true;
+    });
+    return {nit:nit, terceros:terceros, label:preferido.nombre, variantes:Object.keys(variantes)};
+  });
+}
+function grupoTerceroDeNit(nit){
+  if(!nit) return null;
+  return gruposTercerosPorNit().find(function(g){ return g.nit===nit; }) || null;
+}
 function terceroPorNombre(nombre){
   if(!nombre) return null;
   var norm = normNombre(nombre);
@@ -1747,13 +1770,13 @@ var CATEGORIAS_COMPROBANTE = [
 ];
 function comprobantesFiltrados(){
   var q = (S.compBuscar||"").trim().toLowerCase();
-  var terc = S.compTerceroId ? terceroById(S.compTerceroId) : null;
-  if(q || terc){
+  var grupo = S.compTerceroId ? grupoTerceroDeNit(S.compTerceroId) : null;
+  if(q || grupo){
     return S.comprobantes.filter(function(c){
       if(q && !((c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0)) return false;
-      if(terc){
-        var match = terceroPorNombre(extractTercFromDescripcion(c.descripcion));
-        if(!match || match.id!==terc.id) return false;
+      if(grupo){
+        var nombreDoc = normNombre(extractTercFromDescripcion(c.descripcion));
+        if(!nombreDoc || grupo.variantes.indexOf(nombreDoc)<0) return false;
       }
       return true;
     }).sort(function(a,b){ return (b.periodo+b._id).localeCompare(a.periodo+a._id); });
@@ -1788,30 +1811,31 @@ function exportarComprobantes(lista){
   XLSX.writeFile(wb, "comprobantes_"+(currentEmpresa()?currentEmpresa().nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+".xlsx");
 }
 function tercDropdownHTML(){
-  var opts = '<option value="">Consultar por tercero…</option>' + S.terceros.slice().sort(function(a,b){return (a.nombre||"").localeCompare(b.nombre||"");}).map(function(t){
-    return '<option value="'+t.id+'"'+(S.compTerceroId===t.id?" selected":"")+'>'+esc(t.nombre)+'</option>';
+  var grupos = gruposTercerosPorNit().slice().sort(function(a,b){return (a.label||"").localeCompare(b.label||"");});
+  var opts = '<option value="">Consultar por tercero…</option>' + grupos.map(function(g){
+    return '<option value="'+g.nit+'"'+(S.compTerceroId===g.nit?" selected":"")+'>'+esc(g.label)+'</option>';
   }).join("");
   return '<select onchange="app.setCompTercero(this.value)">'+opts+'</select>';
 }
 function comprobantesHTML(e){
   var per = S.periodo || todayPeriodo();
   var q = (S.compBuscar||"").trim().toLowerCase();
-  var terc = S.compTerceroId ? terceroById(S.compTerceroId) : null;
-  if(q || terc){
+  var grupo = S.compTerceroId ? grupoTerceroDeNit(S.compTerceroId) : null;
+  if(q || grupo){
     var found = comprobantesFiltrados();
     var rowsQ = found.map(function(c){
       var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
       return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
         '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
-    }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados'+(terc?" para "+esc(terc.nombre):' para "'+esc(S.compBuscar)+'"')+'.</td></tr>';
+    }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados'+(grupo?" para "+esc(grupo.label):' para "'+esc(S.compBuscar)+'"')+'.</td></tr>';
     var totTerc = found.reduce(function(a,c){return a+(Number(c.total_debito)||0);},0);
     return topbarHTML() +
     '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' + tercDropdownHTML() + '<div class="btn-row">' +
       '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+found.length+')</button>' +
       (q?'<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button>':"") +
-      (terc?'<button class="btn btn-outline btn-sm" onclick="app.setCompTercero(\'\')">Limpiar tercero</button>':"") +
+      (grupo?'<button class="btn btn-outline btn-sm" onclick="app.setCompTercero(\'\')">Limpiar tercero</button>':"") +
     '</div></div>' +
-    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos'+(terc?" para "+esc(terc.nombre)+" — total "+fmtCOP(totTerc):"")+'.</div>' +
+    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos'+(grupo?" para "+esc(grupo.label)+(grupo.terceros.length>1?" ("+grupo.terceros.length+" registros de tercero unidos por NIT)":"")+" — total "+fmtCOP(totTerc):"")+'.</div>' +
     '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rowsQ+'</tbody></table></div>';
   }
   var listPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
@@ -2524,7 +2548,7 @@ window.app = {
   setCompFiltro: function(t){ S.compFiltro=t; render(); },
   setCompBuscar: function(v){ S.compBuscar=v; S.compTerceroId=""; render(); },
   setCompTercero: function(id){ S.compTerceroId=id; S.compBuscar=""; render(); },
-  verDocumentosTercero: function(id){ S.compTerceroId=id; S.compBuscar=""; S.tab="comprobantes"; render(); },
+  verDocumentosTercero: function(id){ var t=terceroById(id); S.compTerceroId=t?normNit(t.identificacion):""; S.compBuscar=""; S.tab="comprobantes"; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
   backdropClose: function(ev){ if(ev.target===ev.currentTarget) closeModal(); },
