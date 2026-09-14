@@ -315,6 +315,8 @@ var S = {
   channels:[],
   empresaChannels:[],
   importRows:null,
+  importSortKey:null,
+  importSortDir:1,
   importFileName:"",
   importBusy:false,
   importErr:"",
@@ -1163,8 +1165,14 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   var etiqueta = esConocidoPersonal ? " [personal]" : (esPersonal ? " [diverso]" : "");
 
   var tot = totalsOf(lineas);
+  // Documento Soporte emitido (pagamos un gasto) -> Comprobante de Egreso.
+  // Documento Soporte recibido y ya reclasificado como ingreso por arriendo/
+  // semovientes -> Nota Contable. Si llega sin reclasificar todavía (tercero
+  // sin concepto de ingreso configurado) se deja como Compra, igual que antes,
+  // para que se siga viendo como pendiente de revisar.
+  var tipoFinal = esDocSoporte ? (empresaEsEmisor ? "CE" : (esVenta ? "NC" : "FC")) : (esVenta? "FV":"FC");
   return {
-    tipo: esVenta? "FV":"FC",
+    tipo: tipoFinal,
     fecha: fecha,
     descripcion: (esNC?"Nota Crédito - ":(esND?"Nota Débito - ":(esVenta?"Venta - ":"Compra - ")))+tercNombre+" ("+docRef+")"+etiqueta,
     lineas: lineas,
@@ -1800,8 +1808,9 @@ function categoriaComprobante(c){
   if(/^Nota Crédito/.test(desc)) return "nc";
   if(/^Nota Débito/.test(desc)) return "nd";
   if(c.tipo==="NM") return "nomina";
-  if(c.tipo==="FV") return "fv";
-  if(c.tipo==="FC"){
+  var esIngresoEspecial = (c.lineas||[]).some(function(l){ return l.cuenta==="424525" || l.cuenta==="413518"; });
+  if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)) return "fv";
+  if(c.tipo==="FC" || c.tipo==="CE"){
     var esMercancia = (c.lineas||[]).some(function(l){ return (l.cuenta||"").slice(0,2)==="14"; });
     return esMercancia ? "fc" : "gastos";
   }
@@ -1966,15 +1975,16 @@ function comprobanteMensualHTML(per){
     var esDevol = /^Nota Crédito/.test(desc);
     var esDC = /^Descuento Condicionado/.test(desc);
     var key;
+    var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
     if(esDC) key="DC";
-    else if(c.tipo==="FV"){
+    else if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)){
       if(esDevol) key="FV_NC";
       else{
         var esArriendo = (c.lineas||[]).some(function(l){return l.cuenta==="424525";});
         var esSemov = (c.lineas||[]).some(function(l){return l.cuenta==="413518";});
         key = esArriendo?"FV_ARR":(esSemov?"FV_SEMOV":"FV");
       }
-    } else if(c.tipo==="FC"){
+    } else if(c.tipo==="FC" || c.tipo==="CE"){
       if(esDevol) key="FC_NC";
       else{
         var esMercancia = (c.lineas||[]).some(function(l){return (l.cuenta||"").slice(0,2)==="14";});
@@ -2083,11 +2093,12 @@ function formulario300HTML(per){
     var esPersonal = /\[(personal|diverso)\]/.test(c.descripcion||"");
     var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
     if(esDC) return;
-    if(c.tipo==="FV"){
+    var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
+    if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)){
       var s = ivaMainDe(c);
       var b = esDevol?vD:vN;
       b.main+=s.main; b.iva+=s.iva;
-    } else if(c.tipo==="FC" && !esPersonal){
+    } else if((c.tipo==="FC" || c.tipo==="CE") && !esPersonal){
       var s2 = ivaMainDe(c);
       var b2 = esDevol?cD:cN;
       b2.main+=s2.main; b2.iva+=s2.iva;
@@ -2162,7 +2173,7 @@ function formulario300HTML(per){
 }
 
 function formulario350HTML(per){
-  var list = S.comprobantes.filter(function(c){ return c.periodo===per && c.tipo==="FC"; });
+  var list = S.comprobantes.filter(function(c){ return c.periodo===per && (c.tipo==="FC" || c.tipo==="CE"); });
   var buckets = {arrPJ:{base:0,ret:0}, arrPN:{base:0,ret:0}, compPJ:{base:0,ret:0}, compPN:{base:0,ret:0}};
   var sinClasificar = {base:0, ret:0, items:[]};
   var reteIvaTotal = 0;
@@ -2368,6 +2379,21 @@ function periodosHTML(e){
   '<p class="small" style="margin-top:10px">Cerrar un periodo valida que débitos = créditos, y bloquea nuevos cambios en ese mes.</p>';
 }
 
+function compararImportRows(a,b,key){
+  if(key==="fecha") return (a.fecha||"").localeCompare(b.fecha||"");
+  if(key==="tipo"){
+    var ta=(a.esVenta?"Venta":"Compra")+(a.esNC?" (NC)":"");
+    var tb=(b.esVenta?"Venta":"Compra")+(b.esNC?" (NC)":"");
+    return ta.localeCompare(tb);
+  }
+  if(key==="tercero") return (a.tercNombre||"").localeCompare(b.tercNombre||"");
+  if(key==="total") return (Number(a.total)||0)-(Number(b.total)||0);
+  return 0;
+}
+function importThHTML(label, key, claseExtra){
+  var arrow = S.importSortKey===key ? (S.importSortDir<0?" ▾":" ▴") : "";
+  return '<th class="'+(claseExtra||"")+'" style="cursor:pointer;user-select:none" onclick="app.setImportSort(\''+key+'\')">'+esc(label)+arrow+'</th>';
+}
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
@@ -2379,7 +2405,15 @@ function importarHTML(e){
 
   if(S.importRows && S.importRows.length){
     var incluidos = S.importRows.filter(function(r){return r.include;}).length;
-    var rows = S.importRows.map(function(r,i){
+    var indicesOrden = S.importRows.map(function(r,i){return i;});
+    if(S.importSortKey){
+      indicesOrden.sort(function(ia,ib){
+        var d = compararImportRows(S.importRows[ia], S.importRows[ib], S.importSortKey);
+        return S.importSortDir<0 ? -d : d;
+      });
+    }
+    var rows = indicesOrden.map(function(i){
+      var r = S.importRows[i];
       var flags = "";
       if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
       else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
@@ -2424,7 +2458,7 @@ function importarHTML(e){
     }).join("");
     body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
       '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos?"":"disabled")+'>Importar seleccionados</button></div>' +
-      '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Tercero</th><th class="num">Total</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th></th>'+importThHTML('Fecha','fecha')+importThHTML('Tipo','tipo')+importThHTML('Tercero','tercero')+importThHTML('Total','total','num')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
       '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución de mercancía (según lo que traiga el archivo). La DIAN no indica si una nota crédito es descuento condicionado, devolución sin factura, o afecta la retención de una factura — revísalas una por una y marca la que corresponda con los enlaces junto al tercero.</p>';
   }
 
@@ -2775,6 +2809,11 @@ window.app = {
 
   onImportFile: function(file){ if(!file) return; handleImportFile(file); },
   toggleImportRow: function(i,val){ S.importRows[i].include = val; render(); },
+  setImportSort: function(key){
+    if(S.importSortKey===key) S.importSortDir = -S.importSortDir;
+    else { S.importSortKey = key; S.importSortDir = 1; }
+    render();
+  },
   marcarDescuentoCondicionado: function(i){
     var r = S.importRows && S.importRows[i];
     if(!r) return;
