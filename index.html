@@ -153,6 +153,11 @@ table.data tbody tr:hover{background:var(--surface-2)}
 .lines-table td.num input{text-align:right;font-family:var(--font-mono)}
 .line-del{background:transparent;border:none;color:var(--ink-faint);font-size:15px;padding:2px 6px}
 .line-del:hover{color:var(--bad)}
+.link-del{color:var(--ink-faint)!important;opacity:.45;transition:opacity .15s,color .15s}
+.link-del:hover{color:var(--bad)!important;opacity:1}
+tr:hover .link-del{opacity:.85}
+.btn-del-soft{color:var(--ink-faint)!important;border-color:var(--border)!important;opacity:.7}
+.btn-del-soft:hover{color:var(--bad)!important;border-color:var(--bad)!important;opacity:1}
 .totals-bar{display:flex;justify-content:flex-end;gap:22px;padding:12px 6px 4px;font-size:13px}
 .totals-bar .t-lbl{color:var(--ink-faint);font-size:11px;text-transform:uppercase;letter-spacing:.04em;display:block}
 .totals-bar .t-val{font-family:var(--font-mono);font-weight:600;font-size:15px}
@@ -305,6 +310,7 @@ var S = {
   compFiltro:"",
   compBuscar:"",
   compTerceroId:"",
+  compCuenta:"",
   periodo:null,
   channels:[],
   empresaChannels:[],
@@ -1748,7 +1754,7 @@ function tercerosHTML(e){
   var rows = listaFiltrada.map(function(t){
     var ciudadDep = [t.ciudad,t.departamento].filter(Boolean).join(", ");
     var nombreCell = esc(t.nombre) + (t.nombre_comercial ? '<br><span class="small">'+esc(t.nombre_comercial)+'</span>' : "");
-    return '<tr><td>'+nombreCell+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.verDocumentosTercero(\''+t.id+'\')">Ver documentos</a> · <a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
+    return '<tr><td>'+nombreCell+'</td><td class="mono">'+esc(t.identificacion)+'</td><td>'+cap(t.tipo)+'</td><td>'+esc(ciudadDep||"—")+'</td><td>'+retencionLabel(t)+'</td><td><a class="link" onclick="app.verDocumentosTercero(\''+t.id+'\')">Ver documentos</a> · <a class="link" onclick="app.openEditarTercero(\''+t.id+'\')">Editar</a> · <a class="link link-del" onclick="app.eliminarTercero(\''+t.id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay terceros que coincidan.</td></tr>';
   var body = topbarHTML() +
   ajustesRetencionHTML() +
@@ -1801,13 +1807,15 @@ var CATEGORIAS_COMPROBANTE = [
 function comprobantesFiltrados(){
   var q = (S.compBuscar||"").trim().toLowerCase();
   var grupo = S.compTerceroId ? grupoTerceroDeNit(S.compTerceroId) : null;
-  if(q || grupo){
+  var cuenta = (S.compCuenta||"").trim().replace(/\D/g,"");
+  if(q || grupo || cuenta){
     return S.comprobantes.filter(function(c){
       if(q && !((c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0)) return false;
       if(grupo){
         var nombreDoc = normNombre(extractTercFromDescripcion(c.descripcion));
         if(!nombreDoc || grupo.variantes.indexOf(nombreDoc)<0) return false;
       }
+      if(cuenta && !(c.lineas||[]).some(function(l){ return (l.cuenta||"").indexOf(cuenta)===0; })) return false;
       return true;
     }).sort(function(a,b){ return (b.periodo+b._id).localeCompare(a.periodo+a._id); });
   }
@@ -1851,22 +1859,35 @@ function comprobantesHTML(e){
   var per = S.periodo || todayPeriodo();
   var q = (S.compBuscar||"").trim().toLowerCase();
   var grupo = S.compTerceroId ? grupoTerceroDeNit(S.compTerceroId) : null;
-  if(q || grupo){
+  var cuenta = (S.compCuenta||"").trim().replace(/\D/g,"");
+  if(q || grupo || cuenta){
     var found = comprobantesFiltrados();
+    var montoCuenta = function(c){
+      var d=0,cr=0;
+      (c.lineas||[]).forEach(function(l){ if((l.cuenta||"").indexOf(cuenta)===0){ d+=Number(l.debito)||0; cr+=Number(l.credito)||0; } });
+      return {d:d,c:cr};
+    };
     var rowsQ = found.map(function(c){
       var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
-      return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
-        '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
-    }).join("") || '<tr><td colspan="7" class="small" style="padding:16px 10px">Sin resultados'+(grupo?" para "+esc(grupo.label):' para "'+esc(S.compBuscar)+'"')+'.</td></tr>';
+      var valorCols = cuenta ? (function(){ var m=montoCuenta(c); return '<td class="num">'+(m.d?fmtCOP(m.d):"")+'</td><td class="num">'+(m.c?fmtCOP(m.c):"")+'</td>'; })() : '<td class="num">'+fmtCOP(c.total_debito)+'</td>';
+      return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td>' + valorCols +
+        '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link link-del" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
+    }).join("") || '<tr><td colspan="8" class="small" style="padding:16px 10px">Sin resultados'+(cuenta?" para la cuenta "+esc(S.compCuenta):(grupo?" para "+esc(grupo.label):' para "'+esc(S.compBuscar)+'"'))+'.</td></tr>';
     var totTerc = found.reduce(function(a,c){return a+(Number(c.total_debito)||0);},0);
+    var totCuentaD=0, totCuentaC=0;
+    if(cuenta) found.forEach(function(c){ var m=montoCuenta(c); totCuentaD+=m.d; totCuentaC+=m.c; });
+    var headCols = cuenta ? '<th class="num">Débito en cuenta</th><th class="num">Crédito en cuenta</th>' : '<th class="num">Valor</th>';
     return topbarHTML() +
-    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' + tercDropdownHTML() + '<div class="btn-row">' +
+    '<div class="toolbar"><div class="search-box"><input id="comp-buscar" value="'+esc(S.compBuscar)+'" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' + tercDropdownHTML() +
+      '<div class="search-box"><input id="comp-cuenta" value="'+esc(S.compCuenta)+'" oninput="app.setCompCuenta(this.value)" placeholder="Cuenta contable (ej. 2408 o 240801)..."></div>' +
+      '<div class="btn-row">' +
       '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+found.length+')</button>' +
       (q?'<button class="btn btn-outline btn-sm" onclick="app.setCompBuscar(\'\')">Limpiar búsqueda</button>':"") +
       (grupo?'<button class="btn btn-outline btn-sm" onclick="app.setCompTercero(\'\')">Limpiar tercero</button>':"") +
+      (cuenta?'<button class="btn btn-outline btn-sm" onclick="app.setCompCuenta(\'\')">Limpiar cuenta</button>':"") +
     '</div></div>' +
-    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos'+(grupo?" para "+esc(grupo.label)+(grupo.terceros.length>1?" ("+grupo.terceros.length+" registros de tercero unidos por NIT)":"")+" — total "+fmtCOP(totTerc):"")+'.</div>' +
-    '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="num">Valor</th><th></th></tr></thead><tbody>'+rowsQ+'</tbody></table></div>';
+    '<div class="small" style="margin:-8px 0 10px">'+found.length+' resultado(s) en todos los períodos'+(grupo?" para "+esc(grupo.label)+(grupo.terceros.length>1?" ("+grupo.terceros.length+" registros de tercero unidos por NIT)":"")+" — total "+fmtCOP(totTerc):"")+(cuenta?" con movimiento en la cuenta "+esc(S.compCuenta)+" — débito total "+fmtCOP(totCuentaD)+", crédito total "+fmtCOP(totCuentaC):"")+'.</div>' +
+    '<div class="card table-wrap"><table class="data"><thead><tr><th>No.</th><th>Período</th><th>Fecha</th><th>Tipo</th><th>Descripción</th>'+headCols+'<th></th></tr></thead><tbody>'+rowsQ+'</tbody></table></div>';
   }
   var listPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
   var conteos = {};
@@ -1881,16 +1902,17 @@ function comprobantesHTML(e){
   var rows = list.map(function(c){
     var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
     return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
-      '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" style="color:var(--bad)" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
+      '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link link-del" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay comprobantes'+(S.compFiltro?" de esta categoría":"")+' en '+periodoLabel(per)+'.</td></tr>';
   var tiposPresentes = {};
   listPeriodo.forEach(function(c){ tiposPresentes[c.tipo]=(tiposPresentes[c.tipo]||0)+1; });
   var bulkBtns = Object.keys(tiposPresentes).map(function(t){
     var lbl = (COMPROB_TIPOS.find(function(x){return x.k===t;})||{}).label||t;
-    return '<button class="btn btn-outline btn-sm" style="color:var(--bad)" onclick="app.eliminarComprobantesPeriodoTipo(\''+per+'\',\''+t+'\')" '+((periodoCerrado(per)||S.bulkDeleteBusy)?"disabled":"")+'>Eliminar todos: '+esc(lbl)+' ('+tiposPresentes[t]+')</button>';
+    return '<button class="btn btn-outline btn-sm btn-del-soft" onclick="app.eliminarComprobantesPeriodoTipo(\''+per+'\',\''+t+'\')" '+((periodoCerrado(per)||S.bulkDeleteBusy)?"disabled":"")+'>Eliminar todos: '+esc(lbl)+' ('+tiposPresentes[t]+')</button>';
   }).join(" ");
   return topbarHTML() +
   '<div class="toolbar"><div class="tabs-sub">'+filtroBtns+'</div><div class="btn-row"><div class="search-box"><input id="comp-buscar" value="" oninput="app.setCompBuscar(this.value)" placeholder="Buscar por número o descripción..."></div>' + tercDropdownHTML() +
+  '<div class="search-box"><input id="comp-cuenta" value="" oninput="app.setCompCuenta(this.value)" placeholder="Cuenta contable (ej. 2408 o 240801)..."></div>' +
   '<button class="btn btn-outline btn-sm" onclick="app.exportarComprobantes()">Exportar Excel ('+list.length+')</button>' +
   '<button class="btn btn-sm" onclick="app.openNuevoComprobante()"'+(periodoCerrado(per)?" disabled":"")+'>+ Nuevo comprobante</button></div></div>' +
   '<div class="toolbar" style="margin-top:-10px"><div class="small">'+list.length+' comprobante(s) en '+periodoLabel(per)+(periodoCerrado(per)?' · <span class="chip chip-good" style="margin-left:4px"><span class="chip-dot"></span>Cerrado</span>':'')+'</div></div>' +
@@ -2419,7 +2441,7 @@ function importarHTML(e){
         '</tr>';
       }).join("");
       body += '<div class="toolbar" style="margin-top:14px"><div class="small">'+selCount+' de '+S.cleanupGroups.length+' proveedor(es) seleccionados para eliminar</div>' +
-        '<button class="btn btn-outline btn-sm" style="border-color:var(--bad);color:var(--bad)" onclick="app.eliminarGruposSeleccionados()" '+(selCount?"":"disabled")+'>Eliminar seleccionados</button></div>' +
+        '<button class="btn btn-outline btn-sm btn-del-soft" onclick="app.eliminarGruposSeleccionados()" '+(selCount?"":"disabled")+'>Eliminar seleccionados</button></div>' +
         '<div class="card table-wrap"><table class="data"><thead><tr><th></th><th>Proveedor (según descripción)</th><th class="num">Comprobantes</th><th class="num">Total</th></tr></thead><tbody>'+rows2+'</tbody></table></div>' +
         '<p class="small" style="margin-top:10px">Marca los proveedores que NO sean del negocio y elimínalos. Los marcados "Proveedor registrado" probablemente sí son reales — revísalos con cuidado antes de tildarlos.</p>';
     }
@@ -2594,8 +2616,9 @@ window.app = {
   setTercFiltro: function(t){ S.tercFiltro=t; render(); },
   setTercBuscar: function(v){ S.tercBuscar=v; render(); },
   setCompFiltro: function(t){ S.compFiltro=t; render(); },
-  setCompBuscar: function(v){ S.compBuscar=v; S.compTerceroId=""; render(); },
-  setCompTercero: function(id){ S.compTerceroId=id; S.compBuscar=""; render(); },
+  setCompBuscar: function(v){ S.compBuscar=v; S.compTerceroId=""; S.compCuenta=""; render(); },
+  setCompTercero: function(id){ S.compTerceroId=id; S.compBuscar=""; S.compCuenta=""; render(); },
+  setCompCuenta: function(v){ S.compCuenta=v; S.compBuscar=""; S.compTerceroId=""; render(); },
   verDocumentosTercero: function(id){ var t=terceroById(id); S.compTerceroId=t?normNit(t.identificacion):""; S.compBuscar=""; S.tab="comprobantes"; render(); },
   setPeriodo: function(p){ S.periodo=p; render(); },
   pickEmpresa: function(id){ S.tab="dashboard"; selectEmpresa(id); },
