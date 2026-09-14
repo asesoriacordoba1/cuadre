@@ -1032,6 +1032,13 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
 
   var retNota = "";
   var tMatch = (terceros||[]).find(function(t){ return nitMatches(empresaEsEmisor?row["NIT Receptor"]:row["NIT Emisor"], t.identificacion); });
+  // Si el tercero está configurado como fuente de ingresos por arriendo/semovientes,
+  // el dinero que se mueve con él siempre es ingreso para el negocio, aunque el
+  // documento de la DIAN venga en dirección de compra (empresa como receptora) --
+  // ej. un Documento Soporte que llega de un arrendatario.
+  if(esCompra && tMatch && (tMatch.concepto_ingreso==="arriendo" || tMatch.concepto_ingreso==="semovientes")){
+    esVenta = true; esCompra = false;
+  }
   if(esCompra && tMatch && config){
     if(tMatch.autorretenedor){ reteRenta = 0; retNota = " (O-15/O-47, sin retención)"; }
     else if(tMatch.concepto_retencion==="compras" || tMatch.concepto_retencion==="arrendamientos"){
