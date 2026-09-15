@@ -2064,10 +2064,16 @@ function comprobanteMensualHTML(per){
     var gravada = a.iva>0 ? (a.iva/19*100) : 0;
     var exenta = a.main - gravada;
     var lado = key==="FV" ? "c" : "d";
+    var ladoContrario = key==="FV" ? "d" : "c";
     if(!bloques[key][sc.gravada]) bloques[key][sc.gravada]={d:0,c:0};
     if(!bloques[key][sc.exenta]) bloques[key][sc.exenta]={d:0,c:0};
-    bloques[key][sc.gravada][lado] += gravada;
-    bloques[key][sc.exenta][lado] += exenta;
+    // Una factura de bonificación puede dar una base negativa (compensa la
+    // gravada) -- eso es en realidad un movimiento del lado contrario, no un
+    // valor negativo en el mismo lado.
+    if(gravada>=0) bloques[key][sc.gravada][lado] += gravada;
+    else bloques[key][sc.gravada][ladoContrario] += -gravada;
+    if(exenta>=0) bloques[key][sc.exenta][lado] += exenta;
+    else bloques[key][sc.exenta][ladoContrario] += -exenta;
   });
   var orden = ["FV","FV_NC","FC","FC_NC","DC","CV","FC_GASTO","FV_ARR","FV_SEMOV","RC","CE","NC","NM"];
   var claves = Object.keys(bloques).sort(function(a,b){
