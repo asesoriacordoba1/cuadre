@@ -1375,8 +1375,8 @@ async function confirmImport(){
 function extractTercFromDescripcion(desc){
   var s = String(desc||"");
   s = s.replace(/^(Compra|Venta|Nota Crédito|Nota Débito) - /, "");
-  s = s.replace(/\s*\([^)]*\)\s*$/, "");
   s = s.replace(/\s*\[(personal|diverso)\]\s*$/, "");
+  s = s.replace(/\s*\([^)]*\)\s*$/, "");
   return s.trim();
 }
 function normNombre(s){
