@@ -2129,8 +2129,10 @@ function ivaMainDe(c){
 function gravadaExentaDe(agg){
   var gravada = agg.iva>0 ? (agg.iva/19*100) : 0;
   var exenta = agg.main - gravada;
-  if(exenta<0){ gravada = agg.main; exenta = 0; }
-  else if(Math.abs(exenta)<1) exenta=0;
+  // No se fuerza a 0 cuando sale negativa: una factura de bonificación puede
+  // dar una base neta negativa (compensa la gravada) y es un valor real, no
+  // un error -- forzarla a 0 corrompía la gravada reportada.
+  if(Math.abs(exenta)<1) exenta=0;
   return {gravada:gravada, exenta:exenta};
 }
 function formulario300HTML(per){
@@ -2179,10 +2181,13 @@ function formulario300HTML(per){
     listaMes.forEach(function(c){
       var devol=/^Nota Crédito/.test(c.descripcion||"");
       var esPersonal=/\[(personal|diverso)\]/.test(c.descripcion||"");
-      var s = (c.tipo==="FV"||c.tipo==="FC") ? ivaMainDe(c) : null;
+      var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
+      var esVentaLike = c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial);
+      var esCompraLike = c.tipo==="FC" || c.tipo==="CE";
+      var s = (esVentaLike||esCompraLike) ? ivaMainDe(c) : null;
       if(!s) return;
-      if(c.tipo==="FV") gen += devol ? -s.iva : s.iva;
-      else if(c.tipo==="FC" && !esPersonal) desc += devol ? -s.iva : s.iva;
+      if(esVentaLike) gen += devol ? -s.iva : s.iva;
+      else if(esCompraLike && !esPersonal) desc += devol ? -s.iva : s.iva;
     });
     var neto = gen-desc;
     return {periodo:p, label: neto>=0?("A pagar "+fmtCOP(neto)):("A favor "+fmtCOP(-neto))};
@@ -2242,7 +2247,9 @@ function formulario350HTML(per){
     if(!esDC){
       (c.lineas||[]).forEach(function(l){
         var pre = (l.cuenta||"").slice(0,2);
-        if(pre==="14"||pre==="51"||pre==="52") base += Number(l.debito)||0;
+        // Neto debito-credito: una bonificacion/descuento del proveedor puede
+        // traer un credito en estas mismas cuentas que reduce la base real.
+        if(pre==="14"||pre==="51"||pre==="52") base += (Number(l.debito)||0) - (Number(l.credito)||0);
       });
       if(!base) base = c.total_debito||0;
     }
