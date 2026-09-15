@@ -1230,6 +1230,43 @@ function rebuildDevolucionCompra(r, conRetencion){
   lineas.push({cuenta:"2205", tercero:"", detalle:"(NC) Proveedor "+r.tercNombre, debito: total-retAjuste, credito:0});
   return lineas;
 }
+function extractDocRefFromDescripcion(desc){
+  var s = String(desc||"").replace(/\s*\[(personal|diverso)\]\s*$/, "");
+  var m = s.match(/\(([^)]*)\)\s*$/);
+  return m ? m[1].trim() : "";
+}
+function buscarFacturaOriginal(docRefBuscado, tercNombre){
+  var buscadoNorm = String(docRefBuscado||"").trim().toUpperCase().replace(/\s+/g,"");
+  if(!buscadoNorm) return null;
+  var candidatos = S.comprobantes.filter(function(c){
+    if(c.tipo!=="FC") return false;
+    if(/^Nota/.test(c.descripcion||"")) return false;
+    var ref = extractDocRefFromDescripcion(c.descripcion).toUpperCase().replace(/\s+/g,"");
+    return ref===buscadoNorm;
+  });
+  var tercNorm = normNombre(tercNombre||"");
+  if(tercNorm){
+    var conTercero = candidatos.filter(function(c){ return normNombre(extractTercFromDescripcion(c.descripcion))===tercNorm; });
+    if(conTercero.length) candidatos = conTercero;
+  }
+  if(!candidatos.length) return null;
+  if(candidatos.length>1) return {_ambiguo:true, candidatos:candidatos};
+  return candidatos[0];
+}
+function rebuildDevolucionDesdeFactura(facturaOriginal, ncTotal, docRefBuscado){
+  var totalOriginal = Number(facturaOriginal.total_debito)||0;
+  if(!totalOriginal) return null;
+  var ratio = Number(ncTotal)/totalOriginal;
+  return (facturaOriginal.lineas||[]).map(function(l){
+    return {
+      cuenta: l.cuenta,
+      tercero: l.tercero||"",
+      detalle: "(NC ref "+docRefBuscado+") "+(l.detalle||""),
+      debito: Math.round((Number(l.credito)||0)*ratio),
+      credito: Math.round((Number(l.debito)||0)*ratio)
+    };
+  });
+}
 function handleImportFile(file){
   S.importBusy=true; S.importErr=""; S.importRows=null; render();
   var reader = new FileReader();
@@ -2423,14 +2460,18 @@ function importarHTML(e){
       var ncToggle = "";
       if(r.esNC && !r.esVenta && !r.dup){
         var estado = r.esNCEstado||"";
-        var chipTxt = {descuento:"Descuento condicionado", sin_retencion:"Devolución sin retención", con_retencion:"Devolución — afecta retención"}[estado];
+        var chipTxt = {descuento:"Descuento condicionado", sin_retencion:"Devolución sin retención", con_retencion:"Devolución — afecta retención", vinculada:"Vinculada a "+esc(r.ncFacturaRef||"")}[estado];
         var chip = chipTxt ? '<span class="chip chip-good" style="margin-left:4px">'+chipTxt+'</span> ' : "";
         var links = [];
         if(estado!=="descuento") links.push('<a class="link" onclick="app.marcarDescuentoCondicionado('+i+')">Descuento condicionado</a>');
         if(estado!=="sin_retencion") links.push('<a class="link" onclick="app.marcarDevolucionSinRetencion('+i+')">Devolución de mercancía (sin factura)</a>');
         if(estado!=="con_retencion") links.push('<a class="link" onclick="app.marcarAfectaRetencion('+i+')">Afecta factura con retención</a>');
         if(estado) links.push('<a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>');
-        ncToggle = chip + links.join(' · ');
+        ncToggle = '<br>' + chip + links.join(' · ');
+        if(estado!=="vinculada"){
+          var vincId = "nc-ref-"+i;
+          ncToggle += '<br><span class="small">N° de factura que afecta: <input id="'+vincId+'" style="width:110px;padding:3px 6px;font-size:12px" placeholder="ej. FC450" onkeydown="if(event.key===\'Enter\')app.vincularNCFactura('+i+',\''+vincId+'\')"> <a class="link" onclick="app.vincularNCFactura('+i+',\''+vincId+'\')">Vincular y reversar exacto</a></span>';
+        }
       }
       var ventaToggle = "";
       if(r.esVenta && !r.esNC && !r.dup){
@@ -2856,6 +2897,27 @@ window.app = {
     if(!r || !r._lineasOriginal) return;
     r.lineas = r._lineasOriginal; r.descripcion = r._descripcionOriginal;
     r.esNCEstado = "";
+    r.ncFacturaRef = "";
+    var tot = totalsOf(r.lineas);
+    r.debeCuadra = Math.abs(tot.d-tot.c)<1;
+    render();
+  },
+  vincularNCFactura: function(i, inputId){
+    var r = S.importRows && S.importRows[i];
+    if(!r) return;
+    var el = document.getElementById(inputId);
+    var folio = ((el && el.value) || "").trim();
+    if(!folio){ alert("Escribe el número de la factura de compra que afecta esta nota crédito."); return; }
+    var encontrada = buscarFacturaOriginal(folio, r.tercNombre);
+    if(!encontrada){ alert('No encontré ninguna Factura de Compra guardada con el número "'+folio+'" para '+r.tercNombre+'. Revisa que esté bien escrito o que esa factura ya se haya importado antes.'); return; }
+    if(encontrada._ambiguo){ alert("Encontré más de una factura con ese número para distintos terceros. Avísame para revisarlo a mano."); return; }
+    var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folio);
+    if(!nuevasLineas){ alert("La factura encontrada no tiene un total válido para calcular la proporción."); return; }
+    if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
+    r.lineas = nuevasLineas;
+    r.descripcion = r._descripcionOriginal;
+    r.esNCEstado = "vinculada";
+    r.ncFacturaRef = folio;
     var tot = totalsOf(r.lineas);
     r.debeCuadra = Math.abs(tot.d-tot.c)<1;
     render();
