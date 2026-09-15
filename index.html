@@ -1020,7 +1020,10 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   var esCompra = !esVenta;
 
   var total = Number(row["Total"])||0;
-  if(total<=0) return null;
+  // Algunas facturas de bonificación/descuento del proveedor netean a Total = 0
+  // (una base exenta negativa que compensa una base gravada + su IVA) pero sí
+  // traen movimiento real -- solo se descartan las filas realmente vacías.
+  if(total<=0 && (Number(row["IVA"])||0)<=0) return null;
   var iva = Number(row["IVA"])||0;
   var reteIva = Number(row["Rete IVA"])||0;
   var reteRenta = Number(row["Rete Renta"])||0;
@@ -1055,8 +1058,13 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   function splitGravadaExenta(){
     var baseGravada = iva>0 ? (iva/19*100) : 0;
     var baseExenta = total - iva - baseGravada;
-    if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
-    else if(Math.abs(baseExenta)<1) baseExenta=0;
+    if(total>0){
+      // Solo se fuerza a 0 cuando el total real es positivo -- en una factura de
+      // bonificación con Total = 0, una exenta negativa es correcta (compensa la
+      // base gravada) y no se debe forzar a cero.
+      if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
+      else if(Math.abs(baseExenta)<1) baseExenta=0;
+    }
     return {gravada:baseGravada, exenta:baseExenta};
   }
 
@@ -1086,7 +1094,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       var baseC = splitGravadaExenta();
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
-      if(baseC.gravada<=0 && baseC.exenta<=0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+      else if(baseC.exenta<0) lineas.push({cuenta:"143590", tercero:"", detalle:"Bonificación/descuento del proveedor "+tercNombre+" - "+docRef, debito:0, credito: -baseC.exenta});
+      if(baseC.gravada<=0 && baseC.exenta===0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
       if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     } else if(tMatch && CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion]){
       lineas.push({cuenta:CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion], tercero:"", detalle:conceptoGasto+" "+tercNombre+" - "+docRef+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
