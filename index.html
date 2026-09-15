@@ -1854,9 +1854,8 @@ function categoriaComprobante(c){
   if(/^Nota Crédito/.test(desc)) return "nc";
   if(/^Nota Débito/.test(desc)) return "nd";
   if(c.tipo==="NM") return "nomina";
-  var esIngresoEspecial = (c.lineas||[]).some(function(l){ return l.cuenta==="424525" || l.cuenta==="413518"; });
-  if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)) return "fv";
-  if(c.tipo==="FC" || c.tipo==="CE"){
+  if(c.tipo==="FV") return "fv";
+  if(c.tipo==="FC"){
     var esMercancia = (c.lineas||[]).some(function(l){ return (l.cuenta||"").slice(0,2)==="14"; });
     return esMercancia ? "fc" : "gastos";
   }
