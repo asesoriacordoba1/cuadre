@@ -163,6 +163,7 @@ tr:hover .link-del{opacity:.85}
 .totals-bar .t-val{font-family:var(--font-mono);font-weight:600;font-size:15px}
 .diff-off .t-val{color:var(--bad)}
 .diff-ok .t-val{color:var(--good)}
+.diff-adjust .t-val{color:var(--warn)}
 
 .banner{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--accent-soft);border:1px solid var(--border-soft);color:var(--accent);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:18px}
 .banner button{background:transparent;border:1px solid currentColor;border-radius:7px;padding:4px 10px;font-size:11.5px;font-weight:600;color:inherit}
@@ -409,7 +410,9 @@ var CUENTAS_HARDCODED = [
   {cuenta_codigo:"240801", cuenta_nombre:"IVA GENERADO VENTAS 19%"},
   {cuenta_codigo:"240802", cuenta_nombre:"IVA DESCONTABLE COMPRAS 19%"},
   {cuenta_codigo:"429530", cuenta_nombre:"OTROS INGRESOS OPERACIONALES"},
-  {cuenta_codigo:"519595", cuenta_nombre:"GASTOS DIVERSOS"}
+  {cuenta_codigo:"519595", cuenta_nombre:"GASTOS DIVERSOS"},
+  {cuenta_codigo:"429550", cuenta_nombre:"AJUSTE AL PESO - INGRESO"},
+  {cuenta_codigo:"530595", cuenta_nombre:"AJUSTE AL PESO - GASTO"}
 ];
 function afterLogin(){
   loadEmpresas().then(function(){ sincronizarCuentasDesdeReglas(CUENTAS_HARDCODED); });
@@ -658,6 +661,22 @@ function totalsOf(lineas){
   lineas.forEach(function(l){ d+=Number(l.debito)||0; c+=Number(l.credito)||0; });
   return {d:d,c:c};
 }
+var TOLERANCIA_AJUSTE_PESO = 50;
+function balancearAjustePeso(lineas, tercero){
+  var tot = totalsOf(lineas);
+  var diff = tot.d - tot.c;
+  if(Math.abs(diff) < 0.005) return lineas;
+  if(Math.abs(diff) > TOLERANCIA_AJUSTE_PESO) return null;
+  var ajuste = Math.round(Math.abs(diff)*100)/100;
+  var nuevaLinea = diff>0
+    ? {cuenta:"429550", tercero:tercero||"", detalle:"Ajuste al peso - Ingreso", debito:0, credito:ajuste}
+    : {cuenta:"530595", tercero:tercero||"", detalle:"Ajuste al peso - Gasto", debito:ajuste, credito:0};
+  return lineas.concat([nuevaLinea]);
+}
+function terceroDeLineas(lineas){
+  var conTercero = (lineas||[]).find(function(l){ return l.tercero; });
+  return conTercero ? conTercero.tercero : "";
+}
 function nextNumero(prefix, periodo){
   var max=0;
   S.comprobantes.forEach(function(c){
@@ -675,6 +694,12 @@ function validarSubcuentas(lineas){
   return (lineas||[]).every(function(l){ return String(l.cuenta||"").length===6; });
 }
 async function guardarComprobante(data){
+  var tot0=totalsOf(data.lineas);
+  if(Math.abs(tot0.d-tot0.c)>0.005 && tot0.d>0){
+    var ajustadas = balancearAjustePeso(data.lineas, terceroDeLineas(data.lineas));
+    if(!ajustadas){ alert("El comprobante debe cuadrar (débitos = créditos) antes de guardarlo. La diferencia supera el margen de ajuste automático ("+TOLERANCIA_AJUSTE_PESO+" pesos) — revisa las líneas."); return; }
+    data = {_id:data._id, tipo:data.tipo, fecha:data.fecha, periodo:data.periodo, descripcion:data.descripcion, lineas:ajustadas};
+  }
   var tot=totalsOf(data.lineas);
   if(Math.abs(tot.d-tot.c)>0.5 || tot.d===0){ alert("El comprobante debe cuadrar (débitos = créditos) antes de guardarlo."); return; }
   if(!validarSubcuentas(data.lineas)){ alert(ERROR_SUBCUENTA_INVALIDA); return; }
@@ -1196,6 +1221,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   }
   var etiqueta = esConocidoPersonal ? " [personal]" : (esPersonal ? " [diverso]" : "");
 
+  var lineasAjustadas = balancearAjustePeso(lineas, terceroDeLineas(lineas));
+  if(lineasAjustadas) lineas = lineasAjustadas;
   var tot = totalsOf(lineas);
   // Documento Soporte emitido (pagamos un gasto) -> Comprobante de Egreso.
   // Documento Soporte recibido y ya reclasificado como ingreso por arriendo/
@@ -1587,9 +1614,10 @@ function refreshTotalsBar(){
   var td=document.getElementById("v-totd"), tc=document.getElementById("v-totc"), df=document.getElementById("v-diff"), box=document.getElementById("v-diffbox"), btn=document.getElementById("v-savebtn");
   if(!td) return;
   td.textContent=fmtCOP(tot.d); tc.textContent=fmtCOP(tot.c); df.textContent=fmtCOP(diff);
-  var ok = Math.abs(diff)<0.5 && tot.d>0;
-  box.className = ok?"diff-ok":"diff-off";
-  if(btn){ if(ok) btn.removeAttribute("disabled"); else btn.setAttribute("disabled","disabled"); }
+  var exacto = Math.abs(diff)<0.5 && tot.d>0;
+  var ajustable = !exacto && Math.abs(diff)<=TOLERANCIA_AJUSTE_PESO && tot.d>0;
+  box.className = exacto?"diff-ok":(ajustable?"diff-adjust":"diff-off");
+  if(btn){ if(exacto||ajustable) btn.removeAttribute("disabled"); else btn.setAttribute("disabled","disabled"); }
 }
 
 /* ---------- render ---------- */
@@ -2688,6 +2716,9 @@ function nuevoComprobanteModal(){
   var cuentaOpts = S.cuentas.filter(function(c){return c.postable && c.codigo.length===6;}).map(function(c){return '<option value="'+c.codigo+'">'+c.codigo+' - '+esc(c.nombre)+'</option>';}).join("");
   var tot = totalsOf(draftLineas);
   var diff = tot.d-tot.c;
+  var diffExacto = Math.abs(diff)<0.5 && tot.d>0;
+  var diffAjustable = !diffExacto && Math.abs(diff)<=TOLERANCIA_AJUSTE_PESO && tot.d>0;
+  var diffClase = diffExacto?"diff-ok":(diffAjustable?"diff-adjust":"diff-off");
   var terceroDetectado = draftDescripcion ? terceroPorNombre(extractTercFromDescripcion(draftDescripcion)) : null;
   var terceroDetectadoHTML = terceroDetectado ?
     ('<p class="small" style="margin:-4px 0 10px">Tercero: <b>'+esc(terceroDetectado.nombre)+'</b> · <a class="link" onclick="app.editarTerceroPorId(\''+terceroDetectado.id+'\')">Editar tercero</a></p>') : "";
@@ -2716,9 +2747,10 @@ function nuevoComprobanteModal(){
     terceroDetectadoHTML +
     '<div class="table-wrap"><table class="data lines-table"><thead><tr><th>Cuenta</th><th>Detalle</th><th class="num">Débito</th><th class="num">Crédito</th><th></th></tr></thead><tbody>'+lineRows+'</tbody></table></div>' +
     '<button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="app.addLinea()">+ Agregar línea</button>' +
-    '<div class="totals-bar"><div><span class="t-lbl">Débitos</span><span class="t-val" id="v-totd">'+fmtCOP(tot.d)+'</span></div><div><span class="t-lbl">Créditos</span><span class="t-val" id="v-totc">'+fmtCOP(tot.c)+'</span></div><div class="'+(Math.abs(diff)<0.5&&tot.d>0?"diff-ok":"diff-off")+'" id="v-diffbox"><span class="t-lbl">Diferencia</span><span class="t-val" id="v-diff">'+fmtCOP(diff)+'</span></div></div>' +
+    '<div class="totals-bar"><div><span class="t-lbl">Débitos</span><span class="t-val" id="v-totd">'+fmtCOP(tot.d)+'</span></div><div><span class="t-lbl">Créditos</span><span class="t-val" id="v-totc">'+fmtCOP(tot.c)+'</span></div><div class="'+diffClase+'" id="v-diffbox"><span class="t-lbl">Diferencia</span><span class="t-val" id="v-diff">'+fmtCOP(diff)+'</span></div></div>' +
+    (diffAjustable ? '<p class="small" style="color:var(--warn);margin-top:4px">La diferencia se ajusta sola al guardar (dentro del margen de '+TOLERANCIA_AJUSTE_PESO+' pesos), agregando una línea de "Ajuste al peso".</p>' : "") +
   '</div>' +
-  '<div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" id="v-savebtn" '+(Math.abs(diff)<0.5&&tot.d>0?"":"disabled")+' onclick="app.submitComprobante()">Guardar comprobante</button></div>' +
+  '<div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" id="v-savebtn" '+((diffExacto||diffAjustable)?"":"disabled")+' onclick="app.submitComprobante()">Guardar comprobante</button></div>' +
   '</div></div>';
 }
 
