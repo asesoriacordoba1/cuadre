@@ -398,7 +398,18 @@ var CUENTAS_HARDCODED = [
   {cuenta_codigo:"516095", cuenta_nombre:"SEGUROS GENERALES"},
   {cuenta_codigo:"421330", cuenta_nombre:"DESCUENTOS COMERCIALES CONDICIONADOS"},
   {cuenta_codigo:"220501", cuenta_nombre:"PROVEEDORES NACIONALES"},
-  {cuenta_codigo:"613501", cuenta_nombre:"COSTO DE VENTA"}
+  {cuenta_codigo:"613501", cuenta_nombre:"COSTO DE VENTA"},
+  {cuenta_codigo:"130505", cuenta_nombre:"CLIENTES NACIONALES"},
+  {cuenta_codigo:"135515", cuenta_nombre:"ANTICIPO DE IMPUESTOS - RETENCION EN LA FUENTE"},
+  {cuenta_codigo:"236540", cuenta_nombre:"RETENCION POR COMPRAS 2.5%"},
+  {cuenta_codigo:"236575", cuenta_nombre:"RETENCION EN LA FUENTE POR ARRENDAMIENTOS 3.5%"},
+  {cuenta_codigo:"236595", cuenta_nombre:"RETENCION EN LA FUENTE POR PAGAR - OTROS CONCEPTOS"},
+  {cuenta_codigo:"236701", cuenta_nombre:"RETENCION DE IVA POR PAGAR"},
+  {cuenta_codigo:"236801", cuenta_nombre:"RETENCION DE INDUSTRIA Y COMERCIO POR PAGAR"},
+  {cuenta_codigo:"240801", cuenta_nombre:"IVA GENERADO VENTAS 19%"},
+  {cuenta_codigo:"240802", cuenta_nombre:"IVA DESCONTABLE COMPRAS 19%"},
+  {cuenta_codigo:"429530", cuenta_nombre:"OTROS INGRESOS OPERACIONALES"},
+  {cuenta_codigo:"519595", cuenta_nombre:"GASTOS DIVERSOS"}
 ];
 function afterLogin(){
   loadEmpresas().then(function(){ sincronizarCuentasDesdeReglas(CUENTAS_HARDCODED); });
@@ -659,9 +670,14 @@ function nextNumero(prefix, periodo){
 }
 function periodoCerrado(p){ return S.periodosDocs[p] && S.periodosDocs[p].estado==="cerrado"; }
 
+var ERROR_SUBCUENTA_INVALIDA = "Contabilización inválida. Debe seleccionar obligatoriamente una subcuenta de 6 dígitos";
+function validarSubcuentas(lineas){
+  return (lineas||[]).every(function(l){ return String(l.cuenta||"").length===6; });
+}
 async function guardarComprobante(data){
   var tot=totalsOf(data.lineas);
   if(Math.abs(tot.d-tot.c)>0.5 || tot.d===0){ alert("El comprobante debe cuadrar (débitos = créditos) antes de guardarlo."); return; }
+  if(!validarSubcuentas(data.lineas)){ alert(ERROR_SUBCUENTA_INVALIDA); return; }
   if(periodoCerrado(data.periodo)){ alert("Ese periodo ya está cerrado. Reábrelo desde Periodos para poder modificarlo."); return; }
   var numero = data._id || nextNumero(data.tipo, data.periodo);
   var row = {
@@ -1072,22 +1088,22 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   var lineas=[];
   if(esVenta){
     var reten = reteIva+reteRenta+reteIca;
-    lineas.push({cuenta:"1305", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
-    if(reten>0) lineas.push({cuenta:"1355", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
+    lineas.push({cuenta:"130505", tercero:"", detalle:"Cliente "+tercNombre+" - "+docRef, debito: total-reten, credito:0});
+    if(reten>0) lineas.push({cuenta:"135515", tercero:"", detalle:"Retenciones practicadas por "+tercNombre, debito:reten, credito:0});
     var conceptoIngreso = tMatch && INGRESO_LABELS[tMatch.concepto_ingreso];
     if(tMatch && tMatch.concepto_ingreso==="semovientes"){
       lineas.push({cuenta:"413518", tercero:"", detalle:"Venta de animales vivos y cueros "+tercNombre+" - "+docRef, debito:0, credito: total-iva});
     } else if(tMatch && tMatch.concepto_ingreso==="arriendo"){
       lineas.push({cuenta:"424525", tercero:"", detalle:"Ingresos por arrendamientos "+tercNombre+" - "+docRef, debito:0, credito: total-iva});
     } else if(conceptoIngreso){
-      lineas.push({cuenta:"4295", tercero:"", detalle:"Ingreso "+conceptoIngreso+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito:0, credito: total-iva});
+      lineas.push({cuenta:"429530", tercero:"", detalle:"Ingreso "+conceptoIngreso+" "+tercNombre+" - "+docRef+" (verificar cuenta)", debito:0, credito: total-iva});
     } else {
       var baseV = splitGravadaExenta();
       if(baseV.gravada>0) lineas.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% "+docRef, debito:0, credito: baseV.gravada});
       if(baseV.exenta>0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida "+docRef, debito:0, credito: baseV.exenta});
-      if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"4135", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+      if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
     }
-    if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
+    if(iva>0) lineas.push({cuenta:"240801", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
   } else {
     var conceptoGasto = tMatch && CONCEPTO_LABELS[tMatch.concepto_retencion];
     var esMercancia = tMatch && tMatch.tipo==="proveedor" && !conceptoGasto;
@@ -1096,24 +1112,27 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
       else if(baseC.exenta<0) lineas.push({cuenta:"143595", tercero:"", detalle:"Descuento/bonificación del proveedor "+tercNombre+" - "+docRef, debito:0, credito: -baseC.exenta});
-      if(baseC.gravada<=0 && baseC.exenta===0) lineas.push({cuenta:"1435", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
-      if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
+      if(baseC.gravada<=0 && baseC.exenta===0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+      if(iva>0) lineas.push({cuenta:"240802", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     } else if(tMatch && CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion]){
       lineas.push({cuenta:CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion], tercero:"", detalle:conceptoGasto+" "+tercNombre+" - "+docRef+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     } else if(conceptoGasto){
-      lineas.push({cuenta:"5195", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)"+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
+      lineas.push({cuenta:"519595", tercero:"", detalle:"Gasto "+conceptoGasto+" "+tercNombre+" - "+docRef+" (verificar cuenta)"+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     } else {
-      lineas.push({cuenta:"5195", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)"+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
+      lineas.push({cuenta:"519595", tercero:"", detalle:"Compra "+tercNombre+" - "+docRef+" (verificar cuenta)"+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     }
     var pagoProveedor = total-reteIva-reteRenta-reteIca;
     if(esMercancia){
-      lineas.push({cuenta:"2205", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
+      lineas.push({cuenta:"220501", tercero:"", detalle:"Proveedor "+tercNombre+" - "+docRef, debito:0, credito:pagoProveedor});
     } else {
       lineas.push({cuenta:"110505", tercero:"", detalle:"Caja "+tercNombre+" - "+docRef+" (diverso)", debito:0, credito:pagoProveedor});
     }
-    if(reteRenta>0) lineas.push({cuenta:"2365", tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
-    if(reteIva>0) lineas.push({cuenta:"2367", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
-    if(reteIca>0) lineas.push({cuenta:"2368", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
+    if(reteRenta>0){
+      var cuentaRet = !tMatch ? "236595" : (tMatch.concepto_retencion==="compras" ? "236540" : (tMatch.concepto_retencion==="arrendamientos" ? "236575" : "236595"));
+      lineas.push({cuenta:cuentaRet, tercero:"", detalle:"Retención en la fuente"+retNota, debito:0, credito:reteRenta});
+    }
+    if(reteIva>0) lineas.push({cuenta:"236701", tercero:"", detalle:"Reteiva", debito:0, credito:reteIva});
+    if(reteIca>0) lineas.push({cuenta:"236801", tercero:"", detalle:"Rete ICA", debito:0, credito:reteIca});
   }
 
   var porReglas = false;
@@ -1211,7 +1230,7 @@ function rebuildVentaMain(r, concepto){
   var out=[];
   if(baseGravada>0) out.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% - "+r.tercNombre, debito:0, credito:baseGravada});
   if(baseExenta>0) out.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida - "+r.tercNombre, debito:0, credito:baseExenta});
-  if(!out.length) out.push({cuenta:"4135", tercero:"", detalle:"Venta - "+r.tercNombre, debito:0, credito: total-iva});
+  if(!out.length) out.push({cuenta:"413590", tercero:"", detalle:"Venta - "+r.tercNombre, debito:0, credito: total-iva});
   return out;
 }
 function rebuildDevolucionCompra(r, conRetencion){
@@ -1222,8 +1241,8 @@ function rebuildDevolucionCompra(r, conRetencion){
   var lineas = [];
   if(baseGravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"(NC) Mercancía gravada 19% "+r.tercNombre, debito:0, credito:baseGravada});
   if(baseExenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"(NC) Mercancía exenta/excluida "+r.tercNombre, debito:0, credito:baseExenta});
-  if(baseGravada<=0 && baseExenta<=0 && total-iva>0) lineas.push({cuenta:"1435", tercero:"", detalle:"(NC) Mercancía "+r.tercNombre, debito:0, credito: total-iva});
-  if(iva>0) lineas.push({cuenta:"2408", tercero:"", detalle:"(NC) IVA descontable", debito:0, credito:iva});
+  if(baseGravada<=0 && baseExenta<=0 && total-iva>0) lineas.push({cuenta:"143590", tercero:"", detalle:"(NC) Mercancía "+r.tercNombre, debito:0, credito: total-iva});
+  if(iva>0) lineas.push({cuenta:"240802", tercero:"", detalle:"(NC) IVA descontable", debito:0, credito:iva});
   var retAjuste = 0;
   if(conRetencion){
     var tMatch = S.terceros.find(function(t){ return t.identificacion && normNit(t.identificacion)===normNit(r.tercIdent||""); });
@@ -1233,11 +1252,12 @@ function rebuildDevolucionCompra(r, conRetencion){
     }
     var cfg = S.config || {tasa_compras:2.5, tasa_arrendamientos:3.5};
     var tasa = tMatch.concepto_retencion==="compras" ? cfg.tasa_compras : cfg.tasa_arrendamientos;
+    var cuentaRet = tMatch.concepto_retencion==="compras" ? "236540" : "236575";
     var baseRet = total-iva;
     retAjuste = Math.round(baseRet*tasa/100);
-    if(retAjuste>0) lineas.push({cuenta:"2365", tercero:"", detalle:"(NC) Ajuste retención en la fuente ("+tasa+"%) - "+r.tercNombre, debito:retAjuste, credito:0});
+    if(retAjuste>0) lineas.push({cuenta:cuentaRet, tercero:"", detalle:"(NC) Ajuste retención en la fuente ("+tasa+"%) - "+r.tercNombre, debito:retAjuste, credito:0});
   }
-  lineas.push({cuenta:"2205", tercero:"", detalle:"(NC) Proveedor "+r.tercNombre, debito: total-retAjuste, credito:0});
+  lineas.push({cuenta:"220501", tercero:"", detalle:"(NC) Proveedor "+r.tercNombre, debito: total-retAjuste, credito:0});
   return lineas;
 }
 function extractDocRefFromDescripcion(desc){
@@ -1319,6 +1339,12 @@ function handleImportFile(file){
 async function confirmImport(){
   var rows = (S.importRows||[]).filter(function(r){return r.include && r.debeCuadra;});
   if(!rows.length){ alert("No hay filas seleccionadas para importar."); return; }
+  var invalidas = rows.filter(function(r){ return !validarSubcuentas(r.lineas); });
+  if(invalidas.length){
+    alert(ERROR_SUBCUENTA_INVALIDA+"\n\nEsto pasó en "+invalidas.length+" documento(s) — probablemente por una regla de cuentas configurada con un código de 4 dígitos en vez de 6. Corrige esa regla en \"Reglas de cuentas\" antes de continuar:\n"+
+      invalidas.slice(0,15).map(function(r){return "- "+r.tercNombre+" ("+r.fecha+")";}).join("\n")+(invalidas.length>15?"\n...":""));
+    return;
+  }
   S.importBusy=true; render();
 
   var nuevosMap = {};
@@ -2684,15 +2710,20 @@ var draftTipo="NC", draftFecha=todayISO(), draftDescripcion="", draftPeriodo=nul
 
 function nuevoComprobanteModal(){
   var per = S.periodo||todayPeriodo();
-  var cuentaOpts = S.cuentas.filter(function(c){return c.postable;}).map(function(c){return '<option value="'+c.codigo+'">'+c.codigo+' - '+esc(c.nombre)+'</option>';}).join("");
+  var cuentaOpts = S.cuentas.filter(function(c){return c.postable && c.codigo.length===6;}).map(function(c){return '<option value="'+c.codigo+'">'+c.codigo+' - '+esc(c.nombre)+'</option>';}).join("");
   var tot = totalsOf(draftLineas);
   var diff = tot.d-tot.c;
   var terceroDetectado = draftDescripcion ? terceroPorNombre(extractTercFromDescripcion(draftDescripcion)) : null;
   var terceroDetectadoHTML = terceroDetectado ?
     ('<p class="small" style="margin:-4px 0 10px">Tercero: <b>'+esc(terceroDetectado.nombre)+'</b> · <a class="link" onclick="app.editarTerceroPorId(\''+terceroDetectado.id+'\')">Editar tercero</a></p>') : "";
   var lineRows = draftLineas.map(function(l,i){
+    var opts = cuentaOpts;
+    if(l.cuenta && String(l.cuenta).length!==6){
+      var acLegacy = cuentaByCodigo(l.cuenta);
+      opts = '<option value="'+l.cuenta+'">'+l.cuenta+' - '+esc(acLegacy?acLegacy.nombre:"cuenta antigua")+' (actualízala a 6 dígitos)</option>' + opts;
+    }
     return '<tr>' +
-      '<td><select onchange="app.updLinea('+i+',\'cuenta\',this.value)">'+cuentaOpts.replace('value="'+l.cuenta+'"','value="'+l.cuenta+'" selected')+'</select></td>' +
+      '<td><select onchange="app.updLinea('+i+',\'cuenta\',this.value)">'+opts.replace('value="'+l.cuenta+'"','value="'+l.cuenta+'" selected')+'</select></td>' +
       '<td><input value="'+esc(l.detalle)+'" oninput="app.updLinea('+i+',\'detalle\',this.value)" placeholder="Detalle"></td>' +
       '<td class="num"><input type="number" value="'+(l.debito||"")+'" oninput="app.updLinea('+i+',\'debito\',this.value)" placeholder="0"></td>' +
       '<td class="num"><input type="number" value="'+(l.credito||"")+'" oninput="app.updLinea('+i+',\'credito\',this.value)" placeholder="0"></td>' +
