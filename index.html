@@ -1073,15 +1073,18 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
   }
 
   function splitGravadaExenta(){
-    var baseGravada = iva>0 ? (iva/19*100) : 0;
+    // El IVA de la DIAN viene redondeado al peso; al revertir la base con
+    // IVA/19% y redondearla, cualquier residuo que quede en la exenta es puro
+    // ruido de redondeo (no una exenta real), así que se limpia hasta $5.
+    var baseGravada = iva>0 ? Math.round(iva/19*100) : 0;
     var baseExenta = total - iva - baseGravada;
     if(total>0){
       // Solo se fuerza a 0 cuando el total real es positivo -- en una factura de
       // bonificación con Total = 0, una exenta negativa es correcta (compensa la
       // base gravada) y no se debe forzar a cero.
       if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
-      else if(Math.abs(baseExenta)<1) baseExenta=0;
-    }
+      else if(Math.abs(baseExenta)<5) baseExenta=0;
+    } else if(Math.abs(baseExenta)<5) baseExenta=0;
     return {gravada:baseGravada, exenta:baseExenta};
   }
 
@@ -1224,9 +1227,10 @@ function rebuildVentaMain(r, concepto){
   var total = r.total, iva = Number(r.iva)||0;
   if(concepto==="semovientes") return [{cuenta:"413518", tercero:"", detalle:"Venta de animales vivos y cueros - "+r.tercNombre, debito:0, credito: total-iva}];
   if(concepto==="arriendo") return [{cuenta:"424525", tercero:"", detalle:"Ingresos por arrendamientos - "+r.tercNombre, debito:0, credito: total-iva}];
-  var baseGravada = iva>0 ? (iva/19*100) : 0;
+  var baseGravada = iva>0 ? Math.round(iva/19*100) : 0;
   var baseExenta = total-iva-baseGravada;
   if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
+  else if(Math.abs(baseExenta)<5) baseExenta=0;
   var out=[];
   if(baseGravada>0) out.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% - "+r.tercNombre, debito:0, credito:baseGravada});
   if(baseExenta>0) out.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida - "+r.tercNombre, debito:0, credito:baseExenta});
@@ -1235,9 +1239,10 @@ function rebuildVentaMain(r, concepto){
 }
 function rebuildDevolucionCompra(r, conRetencion){
   var total = r.total, iva = Number(r.iva)||0;
-  var baseGravada = iva>0 ? (iva/19*100) : 0;
+  var baseGravada = iva>0 ? Math.round(iva/19*100) : 0;
   var baseExenta = total-iva-baseGravada;
   if(baseExenta<0){ baseGravada = total-iva; baseExenta = 0; }
+  else if(Math.abs(baseExenta)<5) baseExenta=0;
   var lineas = [];
   if(baseGravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"(NC) Mercancía gravada 19% "+r.tercNombre, debito:0, credito:baseGravada});
   if(baseExenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"(NC) Mercancía exenta/excluida "+r.tercNombre, debito:0, credito:baseExenta});
@@ -2034,14 +2039,19 @@ function formulariosHTML(e){
 function comprobanteMensualHTML(per){
   var list = S.comprobantes.filter(function(c){return c.periodo===per;});
   if(!list.length) return '<div class="card card-pad"><p class="small">Sin comprobantes en '+periodoLabel(per)+'.</p></div>';
-  var SPLIT_CODES = { FV:{gravada:"413501", exenta:"413590"}, FC:{gravada:"143501", exenta:"143590", descuento:"143595"} };
   var BLOQUE_LABELS = {
     FV:"Ventas", FV_NC:"Devoluciones en Ventas", FV_ARR:"Ingresos por Arrendamiento", FV_SEMOV:"Venta de Semovientes",
     FC:"Compras", FC_NC:"Devoluciones en Compras", FC_GASTO:"Gastos",
     DC:"Descuentos Comerciales Condicionados", CV:"Costo de Venta"
   };
   var bloques={};
-  var agg={};
+  // Cada línea se registra tal cual quedó guardada -- desde que todas las
+  // compras/ventas de mercancía se contabilizan siempre con su gravada,
+  // exenta y descuento (si aplica) ya separados en líneas propias, no hace
+  // falta reconstruir nada a partir del IVA/total del documento: eso solo
+  // servía para documentos viejos sin ese desglose, y esa reconstrucción
+  // agregada era justamente lo que escondía el crédito de una bonificación
+  // dentro del neto de otros documentos exentos del mismo mes.
   list.forEach(function(c){
     var desc = c.descripcion||"";
     var esDevol = /^Nota Crédito/.test(desc);
@@ -2064,47 +2074,12 @@ function comprobanteMensualHTML(per){
       }
     } else key = c.tipo;
     if(!bloques[key]) bloques[key]={};
-    var sc = SPLIT_CODES[key];
-    var ivaDoc = 0, tieneMain = false;
     (c.lineas||[]).forEach(function(l){
       var cuenta = l.cuenta||"";
-      if(cuenta.slice(0,4)==="2408") ivaDoc += (Number(l.debito)||0)+(Number(l.credito)||0);
-      if(sc){
-        var esMain = key==="FV" ? cuenta[0]==="4" : cuenta.slice(0,2)==="14";
-        if(esMain){ tieneMain = true; return; }
-      }
       if(!bloques[key][cuenta]) bloques[key][cuenta]={d:0,c:0};
       bloques[key][cuenta].d += Number(l.debito)||0;
       bloques[key][cuenta].c += Number(l.credito)||0;
     });
-    if(sc && tieneMain){
-      if(!agg[key]) agg[key]={iva:0, main:0};
-      var total = key==="FV" ? (Number(c.total_debito)||0) : (Number(c.total_credito)||0);
-      agg[key].iva += ivaDoc;
-      agg[key].main += (total - ivaDoc);
-    }
-  });
-  Object.keys(agg).forEach(function(key){
-    var sc = SPLIT_CODES[key];
-    var a = agg[key];
-    if(a.main===0) return;
-    var gravada = a.iva>0 ? (a.iva/19*100) : 0;
-    var exenta = a.main - gravada;
-    var lado = key==="FV" ? "c" : "d";
-    var ladoContrario = key==="FV" ? "d" : "c";
-    if(!bloques[key][sc.gravada]) bloques[key][sc.gravada]={d:0,c:0};
-    if(!bloques[key][sc.exenta]) bloques[key][sc.exenta]={d:0,c:0};
-    // Una factura de bonificación (descuento global del 100%) puede dar una
-    // base negativa que compensa la gravada -- eso es un descuento recibido,
-    // no mercancía exenta real, así que va a su propia cuenta del lado
-    // contrario en vez de restarse del mismo lado o mezclarse con exenta.
-    if(gravada>=0) bloques[key][sc.gravada][lado] += gravada;
-    else bloques[key][sc.gravada][ladoContrario] += -gravada;
-    if(exenta>=0) bloques[key][sc.exenta][lado] += exenta;
-    else if(sc.descuento){
-      if(!bloques[key][sc.descuento]) bloques[key][sc.descuento]={d:0,c:0};
-      bloques[key][sc.descuento][ladoContrario] += -exenta;
-    } else bloques[key][sc.exenta][ladoContrario] += -exenta;
   });
   var orden = ["FV","FV_NC","FC","FC_NC","DC","CV","FC_GASTO","FV_ARR","FV_SEMOV","RC","CE","NC","NM"];
   var claves = Object.keys(bloques).sort(function(a,b){
