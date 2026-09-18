@@ -1301,13 +1301,27 @@ function extractDocRefFromDescripcion(desc){
 function buscarFacturaOriginal(docRefBuscado, tercNombre){
   var buscadoNorm = String(docRefBuscado||"").trim().toUpperCase().replace(/\s+/g,"");
   if(!buscadoNorm) return null;
-  var candidatos = S.comprobantes.filter(function(c){
+  var pool = S.comprobantes.slice();
+  (S.importRows||[]).forEach(function(r){
+    if(r.dup || r.esNC || r.esVenta || r.tipo!=="FC") return;
+    if(/^Nota/.test(r.descripcion||"")) return;
+    pool.push({tipo:"FC", descripcion:r.descripcion, lineas:r.lineas, total_debito:totalsOf(r.lineas).d, _delListado:true});
+  });
+  var refDe = function(c){ return extractDocRefFromDescripcion(c.descripcion).toUpperCase().replace(/\s+/g,""); };
+  var candidatos = pool.filter(function(c){
     if(c.tipo!=="FC") return false;
     if(/^Nota/.test(c.descripcion||"")) return false;
-    var ref = extractDocRefFromDescripcion(c.descripcion).toUpperCase().replace(/\s+/g,"");
-    return ref===buscadoNorm;
+    return refDe(c)===buscadoNorm;
   });
   var tercNorm = normNombre(tercNombre||"");
+  if(!candidatos.length && tercNorm && buscadoNorm.length>=3){
+    candidatos = pool.filter(function(c){
+      if(c.tipo!=="FC" || /^Nota/.test(c.descripcion||"")) return false;
+      if(normNombre(extractTercFromDescripcion(c.descripcion))!==tercNorm) return false;
+      var ref = refDe(c);
+      return ref.length>=3 && (ref.slice(-buscadoNorm.length)===buscadoNorm || buscadoNorm.slice(-ref.length)===ref);
+    });
+  }
   if(tercNorm){
     var conTercero = candidatos.filter(function(c){ return normNombre(extractTercFromDescripcion(c.descripcion))===tercNorm; });
     if(conTercero.length) candidatos = conTercero;
@@ -1399,13 +1413,14 @@ function aplicarVinculoNC(i, folio){
   var encontrada = buscarFacturaOriginal(folio, r.tercNombre);
   if(!encontrada) return 'No encontré ninguna Factura de Compra guardada con el número "'+folio+'" para '+r.tercNombre+'. Revisa que esté bien escrito o que esa factura ya se haya importado antes.';
   if(encontrada._ambiguo) return "Encontré más de una factura con ese número para distintos terceros. Avísame para revisarlo a mano.";
-  var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folio);
+  var folioReal = extractDocRefFromDescripcion(encontrada.descripcion) || folio;
+  var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folioReal);
   if(!nuevasLineas) return "La factura encontrada no tiene un total válido para calcular la proporción.";
   if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
   r.lineas = nuevasLineas;
   r.descripcion = r._descripcionOriginal;
   r.esNCEstado = "vinculada";
-  r.ncFacturaRef = folio;
+  r.ncFacturaRef = folioReal;
   var tot = totalsOf(r.lineas);
   r.debeCuadra = Math.abs(tot.d-tot.c)<1;
   return "";
@@ -1444,7 +1459,13 @@ async function cargarXmlNotasCredito(files){
         if(!err){ stats.vinc++; hecho = true; info.push("XML: afecta la factura "+n.ref); }
         else { stats.refNoEnc++; info.push("XML: afecta la factura "+n.ref+" (no está guardada en Cuadre todavía)"); avisos.push(r.tercNombre+" "+n.id+" → factura "+n.ref); }
       } else {
-        stats.sinRef++; info.push("XML: nota sin factura referenciada"+(n.refIgnorada?" (la referencia "+n.refIgnorada+" es de relleno: la nota dice \"sin factura\")":""));
+        var errAprox = n.refIgnorada ? aplicarVinculoNC(idx, n.refIgnorada) : "x";
+        if(!errAprox){
+          stats.vinc++; hecho = true;
+          info.push("XML dice \"sin factura\", pero el mismo tercero tiene la factura "+r.ncFacturaRef+" (folio "+n.refIgnorada+"): la vinculé, verifícala");
+        } else {
+          stats.sinRef++; info.push("XML: nota sin factura referenciada"+(n.refIgnorada?" (la referencia "+n.refIgnorada+" es de relleno: la nota dice \"sin factura\")":""));
+        }
       }
       if(!hecho){
         if(/descuento/i.test(n.concepto)){ app.marcarDescuentoCondicionado(idx, true); stats.desc++; hecho = true; }
@@ -2618,6 +2639,7 @@ function compararImportRows(a,b,key){
     return ta.localeCompare(tb);
   }
   if(key==="tercero") return (a.tercNombre||"").localeCompare(b.tercNombre||"");
+  if(key==="doc") return extractDocRefFromDescripcion(a.descripcion).localeCompare(extractDocRefFromDescripcion(b.descripcion), undefined, {numeric:true});
   if(key==="total") return (Number(a.total)||0)-(Number(b.total)||0);
   return 0;
 }
@@ -2693,6 +2715,7 @@ function importarHTML(e){
         '<td><input type="checkbox" '+(r.include?"checked":"")+' '+(!r.debeCuadra?"disabled":"")+' onchange="app.toggleImportRow('+i+',this.checked)"></td>' +
         '<td>'+fmtDate(r.fecha)+'</td>' +
         '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
+        '<td style="white-space:nowrap">'+esc(extractDocRefFromDescripcion(r.descripcion))+'</td>' +
         '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+'</td>' +
         '<td class="num">'+fmtCOP(r.total)+'</td>' +
         '<td>'+flags+'</td>' +
@@ -2700,7 +2723,7 @@ function importarHTML(e){
     }).join("");
     body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
       '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos?"":"disabled")+'>Importar seleccionados</button></div>' +
-      '<div class="card table-wrap"><table class="data"><thead><tr><th></th>'+importThHTML('Fecha','fecha')+importThHTML('Tipo','tipo')+importThHTML('Tercero','tercero')+importThHTML('Total','total','num')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th></th>'+importThHTML('Fecha','fecha')+importThHTML('Tipo','tipo')+importThHTML('N° documento','doc')+importThHTML('Tercero','tercero')+importThHTML('Total','total','num')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
       '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución de mercancía (según lo que traiga el archivo). La DIAN no indica si una nota crédito es descuento condicionado, devolución sin factura, o afecta la retención de una factura — revísalas una por una y marca la que corresponda con los enlaces junto al tercero.</p>';
   }
 
