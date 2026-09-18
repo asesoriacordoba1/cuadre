@@ -825,6 +825,20 @@ function exportarTerceros(lista){
   XLSX.writeFile(wb, "terceros_"+(currentEmpresa()?currentEmpresa().nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+".xlsx");
 }
 var TIPOS_VALIDOS = ["cliente","proveedor","empleado","personal","otro"];
+function normTextoPlantilla(s){
+  return String(s==null?"":s).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
+}
+// Busca la columna por el comienzo de su encabezado, sin importar mayúsculas, tildes
+// ni lo que venga entre paréntesis (así "¿Aplica retención? (NO/SI)" y "(SI/NO)" valen igual).
+function celdaPlantilla(row, encabezado){
+  var buscado = encabezado.replace(/\s+/g," ");
+  var keys = Object.keys(row);
+  for(var i=0;i<keys.length;i++){
+    var k = keys[i].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[¿?]/g,"").replace(/\([^)]*\)/g,"").replace(/\s+/g," ").trim();
+    if(k===buscado || (buscado!=="tipo" && k.indexOf(buscado)===0)) return row[keys[i]];
+  }
+  return "";
+}
 function handleTercerosImportFile(file){
   S.tercImportErr=""; S.tercImportRows=null; render();
   var reader = new FileReader();
@@ -858,20 +872,27 @@ function handleTercerosImportFile(file){
         var nombre = nombreCompletoTercero(d);
         if(!nombre) return;
         var ident = String(row["Número identificación"]||"").trim();
-        var tipo = String(row["Tipo"]||"proveedor").trim().toLowerCase();
-        if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
-        // Encabezado nuevo "¿Aplica retención? (SI/NO)": SI = se le practica retención.
-        // Se sigue leyendo el encabezado anterior "Sin retención (SI/NO)" (valor invertido).
-        var tipoDefinido = String(row["Tipo"]||"").trim()!=="";
-        var retDefinida = String(row["¿Aplica retención? (SI/NO)"]!==undefined ? row["¿Aplica retención? (SI/NO)"] : (row["Sin retención (SI/NO)"]||"")).trim()!=="";
-        var sinRet;
-        if(row["¿Aplica retención? (SI/NO)"]!==undefined) sinRet = /^n/i.test(String(row["¿Aplica retención? (SI/NO)"]||""));
-        else sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
-        var conc = String(row["Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/afiliaciones/publicidad/diversos)"]||"").trim().toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
-        if(CONCEPTOS_RETENCION.map(function(cr){return cr[0];}).indexOf(conc)<0) conc="";
-        var concIng = String(row["Concepto ingreso (arriendo/semovientes)"]||"").trim().toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
+        var tipoTxt = normTextoPlantilla(celdaPlantilla(row, "tipo"));
+        var tipoDefinido = tipoTxt!=="";
+        var tipo = tipoTxt || "proveedor";
+        // La columna Tipo también puede traer el concepto (seguro, flete, servicio público, diverso...)
+        var concDeTipo = {seguro:"seguros", seguros:"seguros", flete:"fletes", fletes:"fletes", servicio_publico:"servicios_publicos", servicios_publicos:"servicios_publicos",
+          energia:"energia", acueducto:"acueducto", telefono:"telefono", internet:"internet", afiliacion:"afiliaciones", afiliaciones:"afiliaciones",
+          publicidad:"publicidad", diverso:"diversos", diversos:"diversos"}[tipo] || "";
+        if(concDeTipo) tipo = "otro";
+        if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo = "proveedor";
+        // Columna "¿Aplica retención?" (SI = se le practica retención; NO = no se le practica).
+        // Acepta cualquier variante del encabezado y el antiguo "Sin retención" (valor invertido).
+        var aplicaTxt = normTextoPlantilla(celdaPlantilla(row, "aplica retencion"));
+        var sinRetTxt = normTextoPlantilla(celdaPlantilla(row, "sin retencion"));
+        var retDefinida = aplicaTxt!=="" || sinRetTxt!=="";
+        var sinRet = aplicaTxt!=="" ? /^n/.test(aplicaTxt) : /^s/.test(sinRetTxt);
+        var concTxt = normTextoPlantilla(celdaPlantilla(row, "concepto retencion"));
+        var conc = ({compra:"compras", arrendamiento:"arrendamientos", servicio_publico:"servicios_publicos", seguro:"seguros", flete:"fletes", afiliacion:"afiliaciones", diverso:"diversos"}[concTxt]) || concTxt;
+        if(CONCEPTOS_RETENCION.map(function(cr){return cr[0];}).indexOf(conc)<0) conc = "";
+        if(!conc && concDeTipo) conc = concDeTipo;
+        var concIng = normTextoPlantilla(celdaPlantilla(row, "concepto ingreso"));
+        if(concIng==="arrendamientos") concIng = "arriendo";
         if(CONCEPTOS_INGRESO.map(function(ci){return ci[0];}).indexOf(concIng)<0) concIng="";
         var dup = !!(ident && existing[normNit(ident)]);
         rows.push({nombre:nombre, es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2,
