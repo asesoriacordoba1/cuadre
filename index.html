@@ -862,6 +862,8 @@ function handleTercerosImportFile(file){
         if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
         // Encabezado nuevo "¿Aplica retención? (SI/NO)": SI = se le practica retención.
         // Se sigue leyendo el encabezado anterior "Sin retención (SI/NO)" (valor invertido).
+        var tipoDefinido = String(row["Tipo"]||"").trim()!=="";
+        var retDefinida = String(row["¿Aplica retención? (SI/NO)"]!==undefined ? row["¿Aplica retención? (SI/NO)"] : (row["Sin retención (SI/NO)"]||"")).trim()!=="";
         var sinRet;
         if(row["¿Aplica retención? (SI/NO)"]!==undefined) sinRet = /^n/i.test(String(row["¿Aplica retención? (SI/NO)"]||""));
         else sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
@@ -876,6 +878,7 @@ function handleTercerosImportFile(file){
           tipo_documento:tipoDoc, identificacion:ident, tipo:tipo, autorretenedor:sinRet, concepto_retencion:conc, concepto_ingreso:concIng,
           direccion:String(row["Dirección"]||"").trim(), ciudad:String(row["municipio"]||"").trim(),
           departamento:String(row["departamento"]||"").trim(), pais:String(row["País de residencia o domicilio"]||"").trim()||"Colombia",
+          tipoDefinido:tipoDefinido, retDefinida:retDefinida,
           dup:dup, include:!dup});
       });
       S.tercImportRows = rows;
@@ -889,8 +892,45 @@ function handleTercerosImportFile(file){
   reader.readAsArrayBuffer(file);
 }
 async function confirmTercImport(){
-  var rows = (S.tercImportRows||[]).filter(function(r){return r.include;});
-  if(!rows.length) return;
+  var rowsSel = (S.tercImportRows||[]).filter(function(r){return r.include;});
+  if(!rowsSel.length) return;
+  // Los que ya existen (mismo NIT) no se duplican: se actualizan con los datos
+  // que la plantilla trae llenos (lo que venga vacío no borra nada).
+  var rowsUpd = rowsSel.filter(function(r){ return r.dup; });
+  var rows = rowsSel.filter(function(r){ return !r.dup; });
+  var actualizados = 0;
+  if(rowsUpd.length){
+    S.tercImportBusy=true; render();
+    var tareas = [];
+    rowsUpd.forEach(function(r){
+      var nit = normNit(r.identificacion);
+      var cambios = {};
+      if(r.retDefinida) cambios.autorretenedor = r.autorretenedor;
+      if(r.concepto_retencion) cambios.concepto_retencion = r.concepto_retencion;
+      if(r.concepto_ingreso) cambios.concepto_ingreso = r.concepto_ingreso;
+      if(r.tipoDefinido) cambios.tipo = r.tipo;
+      if(r.tipo_documento){ cambios.tipo_documento = r.tipo_documento; cambios.es_juridica = r.es_juridica; }
+      if(r.direccion) cambios.direccion = r.direccion;
+      if(r.ciudad) cambios.ciudad = r.ciudad;
+      if(r.departamento) cambios.departamento = r.departamento;
+      if(!Object.keys(cambios).length) return;
+      S.terceros.filter(function(t){ return normNit(t.identificacion)===nit; }).forEach(function(t){
+        tareas.push({t:t, cambios:cambios});
+      });
+    });
+    for(var k=0;k<tareas.length;k+=20){
+      var lote = tareas.slice(k,k+20);
+      var resU = await Promise.all(lote.map(function(x){ return sb.from("terceros").update(x.cambios).eq("id", x.t.id); }));
+      resU.forEach(function(ru, idx){ if(!ru.error){ Object.assign(lote[idx].t, lote[idx].cambios); actualizados++; } });
+    }
+    S.tercImportBusy=false;
+    if(!rows.length){
+      S.tercImportRows=null; S.tercImportFileName="";
+      render();
+      alert("Se actualizaron "+actualizados+" terceros existentes.");
+      return;
+    }
+  }
   var toInsert = rows.map(function(r){
     return {empresa_id:S.empresaId, nombre:r.nombre, identificacion:r.identificacion, tipo:r.tipo, autorretenedor:r.autorretenedor, concepto_retencion:r.concepto_retencion, concepto_ingreso:r.concepto_ingreso,
       direccion:r.direccion, ciudad:r.ciudad, departamento:r.departamento, pais:r.pais,
@@ -914,7 +954,7 @@ async function confirmTercImport(){
   S.tercImportBusy=false;
   S.tercImportRows=null; S.tercImportFileName="";
   render();
-  alert("Se importaron "+done+" terceros.");
+  alert("Se importaron "+done+" terceros nuevos"+(actualizados?" y se actualizaron "+actualizados+" existentes":"")+".");
 }
 
 /* ---------- cuentas ---------- */
@@ -2124,6 +2164,7 @@ function retencionLabel(t){
   else if(t.concepto_retencion==="arrendamientos") out = '<span class="chip chip-warn">Arrendamientos 3.5%</span>';
   else if(CONCEPTO_LABELS[t.concepto_retencion]) out = '<span class="chip">'+esc(CONCEPTO_LABELS[t.concepto_retencion])+' (sin retención)</span>';
   if(INGRESO_LABELS[t.concepto_ingreso]) out += ' <span class="chip chip-good">'+esc(INGRESO_LABELS[t.concepto_ingreso])+'</span>';
+  if(!out && (t.tipo==="proveedor" || t.tipo==="otro")) return '<span class="chip chip-bad">Retención sin definir</span>';
   return out || '<span class="small">—</span>';
 }
 function ajustesRetencionHTML(){
@@ -2178,7 +2219,7 @@ function tercerosHTML(e){
   if(S.tercImportRows && S.tercImportRows.length){
     var incl = S.tercImportRows.filter(function(r){return r.include;}).length;
     var rows3 = S.tercImportRows.map(function(r,i){
-      var flag = r.dup ? '<span class="chip chip-warn"><span class="chip-dot"></span>Ya existe</span>' : "";
+      var flag = r.dup ? '<span class="chip chip-warn"><span class="chip-dot"></span>Ya existe — márcalo para actualizarlo</span>' : "";
       return '<tr>' +
         '<td><input type="checkbox" '+(r.include?"checked":"")+' onchange="app.toggleTercImportRow('+i+',this.checked)"></td>' +
         '<td>'+esc(r.nombre)+'</td><td class="mono">'+esc(r.identificacion)+'</td><td>'+cap(r.tipo)+'</td>' +
