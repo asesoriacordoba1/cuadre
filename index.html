@@ -2597,7 +2597,7 @@ function formulario350HTML(per){
     if(lineaReteIva) reteIvaTotal += (Number(lineaReteIva.credito)||0) - (Number(lineaReteIva.debito)||0);
     if(!lineaRet) return;
     var montoRet = (Number(lineaRet.credito)||0) - (Number(lineaRet.debito)||0);
-    var esArriendo = /arrendamientos/i.test(lineaRet.detalle||"");
+    var esArriendo = (lineaRet.cuenta||"")==="236575" || /arrendamientos/i.test(lineaRet.detalle||"");
     var base = 0;
     if(!esDC){
       (c.lineas||[]).forEach(function(l){
