@@ -1610,7 +1610,8 @@ function extractTercFromDescripcion(desc){
 function normNombre(s){
   return String(s||"").trim().toUpperCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .replace(/\s+/g," ");
+    .replace(/[.,;]/g," ").replace(/\s+/g," ").trim()
+    .split(" ").sort().join(" ");
 }
 function gruposTercerosPorNit(){
   var byNit = {};
