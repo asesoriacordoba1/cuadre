@@ -1330,7 +1330,60 @@ function buscarFacturaOriginal(docRefBuscado, tercNombre){
   if(candidatos.length>1) return {_ambiguo:true, candidatos:candidatos};
   return candidatos[0];
 }
-function rebuildDevolucionDesdeFactura(facturaOriginal, ncTotal, docRefBuscado){
+function repartirProporcional(lineas, monto, campo){
+  var suma = lineas.reduce(function(a,l){ return a+(Number(l[campo])||0); },0);
+  var acum = 0;
+  return lineas.map(function(l, k){
+    var v = (k===lineas.length-1) ? monto-acum : Math.round(monto*(Number(l[campo])||0)/(suma||1));
+    acum += v;
+    return v;
+  });
+}
+function rebuildDevolucionCalibrada(fo, ncTotal, ncIva, docRef){
+  var lins = fo.lineas||[];
+  var pref = function(l,p){ return (l.cuenta||"").indexOf(p)===0; };
+  var deb = function(l){ return Number(l.debito)||0; }, cre = function(l){ return Number(l.credito)||0; };
+  var ivaLins = lins.filter(function(l){ return pref(l,"2408") && deb(l)>0; });
+  var merch = lins.filter(function(l){ return deb(l)>0 && !pref(l,"2408"); });
+  var rets = lins.filter(function(l){ return cre(l)>0 && (pref(l,"2365")||pref(l,"2367")||pref(l,"2368")); });
+  var pagos = lins.filter(function(l){ return cre(l)>0 && !pref(l,"2365") && !pref(l,"2367") && !pref(l,"2368") && !pref(l,"2408") && !pref(l,"4295") && !pref(l,"5305"); });
+  if(!ivaLins.length || !merch.length || !pagos.length || ncIva<=0) return null;
+  var merchOrig = merch.reduce(function(a,l){ return a+deb(l); },0);
+  if(!merchOrig) return null;
+  var B = ncTotal - ncIva;
+  var G = Math.min(B, Math.round(ncIva/0.19));
+  if(Math.abs(B-G)<5) G = B;
+  var pre = "(NC ref "+docRef+") ";
+  var out = [];
+  var grav = merch.filter(function(l){ return pref(l,"143501"); });
+  var otros = merch.filter(function(l){ return !pref(l,"143501"); });
+  var montos = {};
+  if(grav.length){
+    repartirProporcional(grav, G, "debito").forEach(function(v,k){ montos["g"+k]=v; });
+    if(otros.length) repartirProporcional(otros, B-G, "debito").forEach(function(v,k){ montos["o"+k]=v; });
+  } else {
+    repartirProporcional(otros, B, "debito").forEach(function(v,k){ montos["o"+k]=v; });
+  }
+  grav.forEach(function(l,k){ if(montos["g"+k]) out.push({cuenta:l.cuenta, tercero:l.tercero||"", detalle:pre+(l.detalle||""), debito:0, credito:montos["g"+k]}); });
+  otros.forEach(function(l,k){ if(montos["o"+k]) out.push({cuenta:l.cuenta, tercero:l.tercero||"", detalle:pre+(l.detalle||""), debito:0, credito:montos["o"+k]}); });
+  if(grav.length && !otros.length && B-G>=5) out.push({cuenta:"143590", tercero:"", detalle:pre+"Mercancía exenta/excluida", debito:0, credito:B-G});
+  out.push({cuenta:ivaLins[0].cuenta, tercero:ivaLins[0].tercero||"", detalle:pre+(ivaLins[0].detalle||"IVA descontable"), debito:0, credito:ncIva});
+  var retTotal = 0;
+  rets.forEach(function(l){
+    var v = Math.round(cre(l)*B/merchOrig);
+    retTotal += v;
+    if(v) out.push({cuenta:l.cuenta, tercero:l.tercero||"", detalle:pre+(l.detalle||""), debito:v, credito:0});
+  });
+  repartirProporcional(pagos, ncTotal-retTotal, "credito").forEach(function(v,k){
+    if(v) out.push({cuenta:pagos[k].cuenta, tercero:pagos[k].tercero||"", detalle:pre+(pagos[k].detalle||""), debito:v, credito:0});
+  });
+  return out;
+}
+function rebuildDevolucionDesdeFactura(facturaOriginal, ncTotal, docRefBuscado, nc){
+  if(nc && Number(nc.iva)>0){
+    var calibrada = rebuildDevolucionCalibrada(facturaOriginal, ncTotal, Number(nc.iva), docRefBuscado);
+    if(calibrada) return calibrada;
+  }
   var totalOriginal = Number(facturaOriginal.total_debito)||0;
   if(!totalOriginal) return null;
   var ratio = Number(ncTotal)/totalOriginal;
@@ -1414,7 +1467,7 @@ function aplicarVinculoNC(i, folio){
   if(!encontrada) return 'No encontré ninguna Factura de Compra guardada con el número "'+folio+'" para '+r.tercNombre+'. Revisa que esté bien escrito o que esa factura ya se haya importado antes.';
   if(encontrada._ambiguo) return "Encontré más de una factura con ese número para distintos terceros. Avísame para revisarlo a mano.";
   var folioReal = extractDocRefFromDescripcion(encontrada.descripcion) || folio;
-  var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folioReal);
+  var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folioReal, r);
   if(!nuevasLineas) return "La factura encontrada no tiene un total válido para calcular la proporción.";
   if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
   r.lineas = nuevasLineas;
