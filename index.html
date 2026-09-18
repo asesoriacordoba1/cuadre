@@ -809,7 +809,47 @@ function descargarPlantillaTerceros(){
   ws["!cols"] = TERC_HEADERS.map(function(){return {wch:20};});
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
-  XLSX.writeFile(wb, "plantilla_terceros.xlsx");
+  var ayuda = [
+    ["Columna","Valores permitidos (lista desplegable en la hoja Terceros)"],
+    ["Tipo DE DOCUMENTO","31 = NIT (persona jurídica) · 13 = Cédula de ciudadanía (persona natural) · 22 Cédula de extranjería · 41 Pasaporte · 42 Documento extranjero · 47 PEP · 48 PPT · 11 Registro civil · 12 Tarjeta de identidad · 21 Tarjeta de extranjería"],
+    ["Tipo","cliente · proveedor · empleado · personal · otro. También: seguro · flete · servicio publico · diverso (quedan como tipo otro con ese concepto)"],
+    ["¿Aplica retención?","SI = se le practica retención en la fuente · NO = no se le practica (autorretenedor o régimen simple)"],
+    ["Concepto retención","compras (2,5 %) · arrendamientos (3,5 %) · servicios_publicos · energia · acueducto · telefono · internet · fletes · seguros · afiliaciones · publicidad · diversos. Déjalo vacío si no aplica"],
+    ["Concepto ingreso","arriendo · semovientes. Solo para clientes que te pagan arriendo o compran animales. Vacío = venta normal"]
+  ];
+  var wsAyuda = XLSX.utils.aoa_to_sheet(ayuda);
+  wsAyuda["!cols"] = [{wch:24},{wch:140}];
+  XLSX.utils.book_append_sheet(wb, wsAyuda, "Instrucciones");
+  var guardar = function(blob){
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "plantilla_terceros.xlsx";
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+  // Listas desplegables: SheetJS no las escribe, así que se agregan al XML de la hoja.
+  var listas = [
+    ["A","31,13,22,41,42,47,48,11,12,21"],
+    ["L","proveedor,cliente,empleado,personal,otro,seguro,flete,servicio publico,diverso"],
+    ["M","SI,NO"],
+    ["N","compras,arrendamientos,servicios_publicos,energia,acueducto,telefono,internet,fletes,seguros,afiliaciones,publicidad,diversos"],
+    ["O","arriendo,semovientes"]
+  ];
+  try{
+    var bin = XLSX.write(wb, {bookType:"xlsx", type:"array"});
+    JSZip.loadAsync(bin).then(function(zip){
+      var nombre = "xl/worksheets/sheet1.xml";
+      return zip.file(nombre).async("string").then(function(xml){
+        var dv = '<dataValidations count="'+listas.length+'">' + listas.map(function(l){
+          return '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Valor no válido" error="Elige un valor de la lista." sqref="'+l[0]+'2:'+l[0]+'2000"><formula1>"'+l[1]+'"</formula1></dataValidation>';
+        }).join("") + '</dataValidations>';
+        xml = xml.replace("</sheetData>", "</sheetData>"+dv);
+        zip.file(nombre, xml);
+        return zip.generateAsync({type:"blob", mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", compression:"DEFLATE"});
+      });
+    }).then(guardar).catch(function(){ XLSX.writeFile(wb, "plantilla_terceros.xlsx"); });
+  }catch(err){
+    XLSX.writeFile(wb, "plantilla_terceros.xlsx");
+  }
 }
 var EXPORT_TERC_HEADERS = ["Nombre","Nombre comercial","Identificación","Tipo doc.","Tipo (Cuadre)","Régimen","¿Aplica retención?","Concepto retención","Concepto ingreso","Dirección","Municipio","Departamento","País"];
 function exportarTerceros(lista){
