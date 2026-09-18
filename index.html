@@ -2389,22 +2389,35 @@ function formulario300HTML(per){
 
   var vN={main:0,iva:0}, vD={main:0,iva:0};
   var cN={main:0,iva:0}, cD={main:0,iva:0};
+  var detalle300 = [];
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"");
     var esPersonal = /\[(personal|diverso)\]/.test(c.descripcion||"");
     var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
     if(esDC) return;
     var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
+    var filaDet300 = function(sec, s){
+      var nom = extractTercFromDescripcion(c.descripcion);
+      var tm = terceroPorNombre(nom);
+      var ge = gravadaExentaDe(s);
+      detalle300.push({sec:sec, nit: tm?(tm.identificacion||""):"", tercero:nom, fecha:c.fecha,
+        tipoDoc: c.tipo==="CE" ? "Documento soporte" : (c.tipo==="NC" ? "Nota contable (ingreso)" : (esDevol ? "Nota de crédito electrónica" : (c.tipo==="FV" ? "Factura de venta" : "Factura electrónica"))),
+        doc: extractDocRefFromDescripcion(c.descripcion), grav: ge.gravada, exenta: ge.exenta, iva: s.iva});
+    };
     if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)){
       var s = ivaMainDe(c);
       var b = esDevol?vD:vN;
       b.main+=s.main; b.iva+=s.iva;
+      filaDet300(esDevol?"vD":"vN", s);
     } else if((c.tipo==="FC" || c.tipo==="CE") && !esPersonal){
       var s2 = ivaMainDe(c);
       var b2 = esDevol?cD:cN;
       b2.main+=s2.main; b2.iva+=s2.iva;
+      filaDet300(esDevol?"cD":"cN", s2);
     }
   });
+  detalle300.sort(function(a,b){ return (a.tercero||"").localeCompare(b.tercero||"") || (a.fecha||"").localeCompare(b.fecha||""); });
+  S._det300 = {bim: bim, filas: detalle300};
   var vNs=gravadaExentaDe(vN), vDs=gravadaExentaDe(vD);
   var cNs=gravadaExentaDe(cN), cDs=gravadaExentaDe(cD);
   var c28=vNs.gravada, c35=vNs.exenta;
@@ -2471,9 +2484,63 @@ function formulario300HTML(per){
     '<div class="table-wrap"><table class="data"><thead><tr><th>Mes</th><th>IVA generado (67) − descontable (81)</th></tr></thead><tbody>' +
       meses.map(function(m){return '<tr><td>'+esc(periodoLabel(m.periodo))+'</td><td>'+esc(m.label)+'</td></tr>';}).join("") +
     '</tbody></table></div>' +
+    detalle300HTML(detalle300) +
     '<p class="small" style="margin-top:14px">No incluye importaciones, exportaciones, operaciones a 5%, retenciones de IVA ni saldos a favor de periodos anteriores — agrégalos manualmente al presentar si aplican para este cliente.</p>' +
   '</div>';
   return html;
+}
+var SECCIONES_300 = [
+  ["vN","Ventas (casillas 28 / 35 / 67)"],
+  ["vD","Devoluciones en ventas (casilla 42)"],
+  ["cN","Compras (casillas 51 / 54 / 72)"],
+  ["cD","Devoluciones en compras (casilla 56)"]
+];
+function detalle300HTML(filas){
+  var out = '<div style="display:flex;align-items:center;justify-content:space-between;margin:22px 0 6px"><div class="small" style="font-weight:600">Detalle por documento</div><button class="btn btn-outline btn-sm" onclick="app.exportar300()">Descargar Excel del detalle</button></div>';
+  SECCIONES_300.forEach(function(sec){
+    var f = filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var tg=0, te=0, ti=0;
+    var rows = f.map(function(x){
+      tg+=x.grav; te+=x.exenta; ti+=x.iva;
+      return '<tr><td class="mono">'+esc(x.nit)+'</td><td>'+esc(x.tercero)+'</td><td>'+fmtDate(x.fecha)+'</td><td>'+esc(x.tipoDoc)+'</td><td class="mono">'+esc(x.doc)+'</td><td class="num">'+fmtCOP(x.grav)+'</td><td class="num">'+fmtCOP(x.exenta)+'</td><td class="num">'+fmtCOP(x.iva)+'</td></tr>';
+    }).join("");
+    out += '<div class="small" style="font-weight:600;margin:14px 0 6px">'+esc(sec[1])+' · '+f.length+' documento(s)</div>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th>NIT</th><th>Tercero</th><th>Fecha</th><th>Tipo de documento</th><th>N° documento</th><th class="num">Base gravada</th><th class="num">Base exenta/excluida</th><th class="num">IVA</th></tr></thead><tbody>'+rows+
+      '<tr style="font-weight:700"><td colspan="5">Total</td><td class="num">'+fmtCOP(tg)+'</td><td class="num">'+fmtCOP(te)+'</td><td class="num">'+fmtCOP(ti)+'</td></tr></tbody></table></div>';
+  });
+  return out;
+}
+function exportar300(){
+  var d = S._det300;
+  if(!d || !d.filas) return;
+  var e = currentEmpresa();
+  var aoa = [
+    [(e?e.nombre:"")+" - IVA FORMULARIO 300"],
+    [d.bim.label+" · Periodo DIAN "+d.bim.codigo],
+    [],
+    ["RESUMEN"],
+    ["Concepto","Base gravada","Base exenta/excluida","IVA"]
+  ];
+  SECCIONES_300.forEach(function(sec){
+    var f = d.filas.filter(function(x){ return x.sec===sec[0]; });
+    var g=0, x2=0, i=0; f.forEach(function(x){ g+=x.grav; x2+=x.exenta; i+=x.iva; });
+    aoa.push([sec[1], Math.round(g), Math.round(x2), Math.round(i)]);
+  });
+  SECCIONES_300.forEach(function(sec){
+    var f = d.filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var g=0, x2=0, i=0;
+    aoa.push([]); aoa.push(["DETALLE - "+sec[1].toUpperCase()]);
+    aoa.push(["NIT","Tercero","Fecha","Tipo Documento","N° documento","Base gravada","Base exenta/excluida","IVA"]);
+    f.forEach(function(x){ g+=x.grav; x2+=x.exenta; i+=x.iva; aoa.push([x.nit, x.tercero, fmtDate(x.fecha), x.tipoDoc, x.doc, Math.round(x.grav), Math.round(x.exenta), Math.round(x.iva)]); });
+    aoa.push(["","","","","Total",Math.round(g),Math.round(x2),Math.round(i)]);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:14},{wch:46},{wch:12},{wch:28},{wch:16},{wch:16},{wch:20},{wch:14}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "F300 "+d.bim.codigo);
+  XLSX.writeFile(wb, "iva_300_"+(e?e.nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+"_"+d.bim.codigo+".xlsx");
 }
 
 function formulario350HTML(per){
@@ -3267,6 +3334,7 @@ window.app = {
     render();
   },
   exportar350: exportar350,
+  exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
   marcarIngresoVenta: function(i, concepto){
     var r = S.importRows && S.importRows[i];
