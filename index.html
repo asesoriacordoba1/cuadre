@@ -1298,15 +1298,20 @@ function extractDocRefFromDescripcion(desc){
   var m = s.match(/\(([^)]*)\)\s*$/);
   return m ? m[1].trim() : "";
 }
-function buscarFacturaOriginal(docRefBuscado, tercNombre){
+function buscarFacturaOriginal(docRefBuscado, tercNombre, tercNit){
   var buscadoNorm = String(docRefBuscado||"").trim().toUpperCase().replace(/\s+/g,"");
   if(!buscadoNorm) return null;
   var pool = S.comprobantes.slice();
   (S.importRows||[]).forEach(function(r){
     if(r.dup || r.esNC || r.esVenta || r.tipo!=="FC") return;
     if(/^Nota/.test(r.descripcion||"")) return;
-    pool.push({tipo:"FC", descripcion:r.descripcion, lineas:r.lineas, total_debito:totalsOf(r.lineas).d, _delListado:true});
+    pool.push({tipo:"FC", descripcion:r.descripcion, lineas:r.lineas, total_debito:totalsOf(r.lineas).d, tercero_nit:normNit(r.tercIdent||""), _delListado:true});
   });
+  var nitBuscado = normNit(tercNit||"");
+  var mismoTercero = function(c){
+    if(nitBuscado && c.tercero_nit) return normNit(c.tercero_nit)===nitBuscado;
+    return normNombre(extractTercFromDescripcion(c.descripcion))===normNombre(tercNombre||"");
+  };
   var refDe = function(c){ return extractDocRefFromDescripcion(c.descripcion).toUpperCase().replace(/\s+/g,""); };
   var candidatos = pool.filter(function(c){
     if(c.tipo!=="FC") return false;
@@ -1314,16 +1319,16 @@ function buscarFacturaOriginal(docRefBuscado, tercNombre){
     return refDe(c)===buscadoNorm;
   });
   var tercNorm = normNombre(tercNombre||"");
-  if(!candidatos.length && tercNorm && buscadoNorm.length>=3){
+  if(!candidatos.length && (tercNorm||nitBuscado) && buscadoNorm.length>=3){
     candidatos = pool.filter(function(c){
       if(c.tipo!=="FC" || /^Nota/.test(c.descripcion||"")) return false;
-      if(normNombre(extractTercFromDescripcion(c.descripcion))!==tercNorm) return false;
+      if(!mismoTercero(c)) return false;
       var ref = refDe(c);
       return ref.length>=3 && (ref.slice(-buscadoNorm.length)===buscadoNorm || buscadoNorm.slice(-ref.length)===ref);
     });
   }
-  if(tercNorm){
-    var conTercero = candidatos.filter(function(c){ return normNombre(extractTercFromDescripcion(c.descripcion))===tercNorm; });
+  if(tercNorm||nitBuscado){
+    var conTercero = candidatos.filter(mismoTercero);
     if(conTercero.length) candidatos = conTercero;
   }
   if(!candidatos.length) return null;
@@ -1463,7 +1468,7 @@ async function extraerXmlsDeArchivos(files){
 function aplicarVinculoNC(i, folio){
   var r = S.importRows && S.importRows[i];
   if(!r) return "Fila no encontrada.";
-  var encontrada = buscarFacturaOriginal(folio, r.tercNombre);
+  var encontrada = buscarFacturaOriginal(folio, r.tercNombre, r.tercIdent);
   if(!encontrada) return 'No encontré ninguna Factura de Compra guardada con el número "'+folio+'" para '+r.tercNombre+'. Revisa que esté bien escrito o que esa factura ya se haya importado antes.';
   if(encontrada._ambiguo) return "Encontré más de una factura con ese número para distintos terceros. Avísame para revisarlo a mano.";
   var folioReal = extractDocRefFromDescripcion(encontrada.descripcion) || folio;
@@ -1626,7 +1631,7 @@ async function confirmImport(){
     var periodo = r.fecha.slice(0,7);
     var numero = nextNum(r.tipo, periodo);
     var tot = totalsOf(r.lineas);
-    return {empresa_id:S.empresaId, numero:numero, tipo:r.tipo, fecha:r.fecha, periodo:periodo, descripcion:r.descripcion, lineas:r.lineas, total_debito:tot.d, total_credito:tot.c, estado:"contabilizado", cufe:r.cufe||null};
+    return {empresa_id:S.empresaId, numero:numero, tipo:r.tipo, fecha:r.fecha, periodo:periodo, descripcion:r.descripcion, lineas:r.lineas, total_debito:tot.d, total_credito:tot.c, estado:"contabilizado", cufe:r.cufe||null, tercero_nit:normNit(r.tercIdent||"")||null};
   });
   var CHUNK=500, done=0;
   for(var i=0;i<toInsert.length;i+=CHUNK){
@@ -1663,8 +1668,29 @@ function extractTercFromDescripcion(desc){
 function normNombre(s){
   return String(s||"").trim().toUpperCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .replace(/[.,;]/g," ").replace(/\s+/g," ").trim()
-    .split(" ").sort().join(" ");
+    .replace(/\./g,"").replace(/[^A-Z0-9]+/g," ").trim()
+    .split(" ").filter(function(t){ return t.length>1 && ["SA","SAS","LTDA","CIA","SCA","ENC","EU"].indexOf(t)<0; })
+    .sort().join(" ");
+}
+// Tercero de un comprobante: primero por NIT guardado (no cambia nunca);
+// solo si el comprobante no lo tiene se usa el nombre como respaldo.
+var _idxNit = {arr:null, len:-1, map:{}, sello:""};
+function terceroDeComprobante(c){
+  var nit = normNit(c.tercero_nit||"");
+  if(nit){
+    var sello = S.terceros.length ? (S.terceros[0].identificacion||"")+"|"+(S.terceros[S.terceros.length-1].identificacion||"") : "";
+    if(_idxNit.arr!==S.terceros || _idxNit.len!==S.terceros.length || _idxNit.sello!==sello){
+      var map = {};
+      S.terceros.forEach(function(t){
+        var n = normNit(t.identificacion);
+        if(!n) return;
+        if(!map[n] || (t.tipo && t.tipo!=="cliente" && t.tipo!=="otro" && (!map[n].tipo || map[n].tipo==="cliente" || map[n].tipo==="otro"))) map[n] = t;
+      });
+      _idxNit = {arr:S.terceros, len:S.terceros.length, map:map, sello:sello};
+    }
+    if(_idxNit.map[nit]) return _idxNit.map[nit];
+  }
+  return terceroPorNombre(extractTercFromDescripcion(c.descripcion));
 }
 function gruposTercerosPorNit(){
   var byNit = {};
@@ -1693,9 +1719,18 @@ function terceroPorNombre(nombre){
   if(!nombre) return null;
   var norm = normNombre(nombre);
   if(!norm) return null;
-  return S.terceros.find(function(t){ return normNombre(t.nombre)===norm; }) ||
-    S.terceros.find(function(t){ return normNombre(t.nombre_comercial)===norm; });
+  var sello = S.terceros.length ? (S.terceros[0].nombre||"")+"|"+(S.terceros[S.terceros.length-1].nombre||"") : "";
+  if(_idxNombre.arr!==S.terceros || _idxNombre.len!==S.terceros.length || _idxNombre.sello!==sello){
+    var mp = {}, mc = {};
+    S.terceros.forEach(function(t){
+      var a = normNombre(t.nombre); if(a && !mp[a]) mp[a] = t;
+      var b = normNombre(t.nombre_comercial); if(b && !mc[b]) mc[b] = t;
+    });
+    _idxNombre = {arr:S.terceros, len:S.terceros.length, sello:sello, porNombre:mp, porComercial:mc};
+  }
+  return _idxNombre.porNombre[norm] || _idxNombre.porComercial[norm] || null;
 }
+var _idxNombre = {arr:null, len:-1, sello:"", porNombre:{}, porComercial:{}};
 function analizarDocSoporte(){
   var grupos = gruposTercerosPorNit();
   var nitCompraConfig = {};
@@ -2147,8 +2182,12 @@ function comprobantesFiltrados(){
     return S.comprobantes.filter(function(c){
       if(q && !((c._id||"").toLowerCase().indexOf(q)>=0 || (c.descripcion||"").toLowerCase().indexOf(q)>=0)) return false;
       if(grupo){
-        var nombreDoc = normNombre(extractTercFromDescripcion(c.descripcion));
-        if(!nombreDoc || grupo.variantes.indexOf(nombreDoc)<0) return false;
+        if(c.tercero_nit){
+          if(normNit(c.tercero_nit)!==grupo.nit) return false;
+        } else {
+          var nombreDoc = normNombre(extractTercFromDescripcion(c.descripcion));
+          if(!nombreDoc || grupo.variantes.indexOf(nombreDoc)<0) return false;
+        }
       }
       if(cuenta && !(c.lineas||[]).some(function(l){ return (l.cuenta||"").indexOf(cuenta)===0; })) return false;
       return true;
@@ -2398,9 +2437,9 @@ function formulario300HTML(per){
     var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
     var filaDet300 = function(sec, s){
       var nom = extractTercFromDescripcion(c.descripcion);
-      var tm = terceroPorNombre(nom);
+      var tm = terceroDeComprobante(c);
       var ge = gravadaExentaDe(s);
-      detalle300.push({sec:sec, nit: tm?(tm.identificacion||""):"", tercero:nom, fecha:c.fecha,
+      detalle300.push({sec:sec, nit: c.tercero_nit || (tm?(tm.identificacion||""):""), tercero:nom, fecha:c.fecha,
         tipoDoc: c.tipo==="CE" ? "Documento soporte" : (c.tipo==="NC" ? "Nota contable (ingreso)" : (esDevol ? "Nota de crédito electrónica" : (c.tipo==="FV" ? "Factura de venta" : "Factura electrónica"))),
         doc: extractDocRefFromDescripcion(c.descripcion), grav: ge.gravada, exenta: ge.exenta, iva: s.iva});
     };
@@ -2552,7 +2591,7 @@ function formulario350HTML(per){
   list.forEach(function(c){
     var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
     var nombre = extractTercFromDescripcion(c.descripcion);
-    var tMatch = terceroPorNombre(nombre);
+    var tMatch = terceroDeComprobante(c);
     var lineaRet = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2365"; });
     var lineaReteIva = (c.lineas||[]).find(function(l){ return (l.cuenta||"").slice(0,4)==="2367"; });
     if(lineaReteIva) reteIvaTotal += (Number(lineaReteIva.credito)||0) - (Number(lineaReteIva.debito)||0);
