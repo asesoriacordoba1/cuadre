@@ -797,13 +797,13 @@ async function eliminarTercero(id){
 }
 
 /* ---------- importar terceros masivo ---------- */
-var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","Sin retención (SI/NO)","Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/afiliaciones/publicidad/diversos)","Concepto ingreso (arriendo/semovientes)"];
+var TERC_HEADERS = ["Tipo DE DOCUMENTO","Número identificación","Primer apellido del informado","Segundo apellido del informado","Primer nombre del informado","Otros nombres del informado","Razón social informado","Dirección","municipio","departamento","País de residencia o domicilio","Tipo","¿Aplica retención? (SI/NO)","Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/afiliaciones/publicidad/diversos)","Concepto ingreso (arriendo/semovientes)"];
 function descargarPlantillaTerceros(){
   var data = [
     TERC_HEADERS,
-    ["31","1037111222","","","","","Johny Andrés Giraldo Marín","Cra 5 # 10-20","Montería","Córdoba","Colombia","proveedor","NO","compras",""],
-    ["13","1037222333","Giraldo","Marín","Johny","Andrés","","Cll 20 # 5-15","Cartagena","Bolívar","Colombia","proveedor","NO","arrendamientos",""],
-    ["31","900333444","","","","","Proveedor Régimen Simple","","","","Colombia","proveedor","SI","",""]
+    ["31","900111222","","","","","Proveedor Persona Jurídica S.A.S.","Cra 5 # 10-20","Montería","Córdoba","Colombia","proveedor","SI","compras",""],
+    ["13","1037222333","Giraldo","Marín","Johny","Andrés","","Cll 20 # 5-15","Cartagena","Bolívar","Colombia","proveedor","SI","arrendamientos",""],
+    ["31","900333444","","","","","Proveedor Régimen Simple (no aplica retención)","","","","Colombia","proveedor","NO","",""]
   ];
   var ws = XLSX.utils.aoa_to_sheet(data);
   ws["!cols"] = TERC_HEADERS.map(function(){return {wch:20};});
@@ -811,11 +811,11 @@ function descargarPlantillaTerceros(){
   XLSX.utils.book_append_sheet(wb, ws, "Terceros");
   XLSX.writeFile(wb, "plantilla_terceros.xlsx");
 }
-var EXPORT_TERC_HEADERS = ["Nombre","Nombre comercial","Identificación","Tipo doc.","Tipo (Cuadre)","Régimen","Sin retención","Concepto retención","Concepto ingreso","Dirección","Municipio","Departamento","País"];
+var EXPORT_TERC_HEADERS = ["Nombre","Nombre comercial","Identificación","Tipo doc.","Tipo (Cuadre)","Régimen","¿Aplica retención?","Concepto retención","Concepto ingreso","Dirección","Municipio","Departamento","País"];
 function exportarTerceros(lista){
   var data = [EXPORT_TERC_HEADERS].concat(lista.map(function(t){
     return [t.nombre||"", t.nombre_comercial||"", t.identificacion||"", t.tipo_documento||"", t.tipo||"", t.regimen||"",
-      t.autorretenedor?"SI":"NO", CONCEPTO_LABELS[t.concepto_retencion]||t.concepto_retencion||"", INGRESO_LABELS[t.concepto_ingreso]||t.concepto_ingreso||"",
+      t.autorretenedor?"NO":"SI", CONCEPTO_LABELS[t.concepto_retencion]||t.concepto_retencion||"", INGRESO_LABELS[t.concepto_ingreso]||t.concepto_ingreso||"",
       t.direccion||"", t.ciudad||"", t.departamento||"", t.pais||""];
   }));
   var ws = XLSX.utils.aoa_to_sheet(data);
@@ -842,15 +842,29 @@ function handleTercerosImportFile(file){
         var ap2 = String(row["Segundo apellido del informado"]||"").trim();
         var nom1 = String(row["Primer nombre del informado"]||"").trim();
         var nom2 = String(row["Otros nombres del informado"]||"").trim();
-        var esJur = !!razon;
+        var tipoDocRaw = String(row["Tipo DE DOCUMENTO"]||"").trim();
+        var tipoDoc = tipoDocRaw || "31";
+        // El tipo de documento manda: 31 = NIT (persona jurídica); cualquier
+        // otro (13 cédula, 22 extranjería, 41 pasaporte, 47/48...) = persona natural.
+        // Si viene vacío, se deduce de si hay razón social o nombres.
+        var esJur = tipoDocRaw ? tipoDocRaw==="31" : !!razon;
+        var partesNom = [ap1, ap2, nom1, nom2].filter(Boolean);
+        if(esJur && !razon){ razon = partesNom.join(" "); ap1 = ap2 = nom1 = nom2 = ""; }
+        else if(!esJur && !partesNom.length && razon){
+          var sep = datosTerceroDesdeDian(razon, "1");
+          ap1 = sep.primer_apellido||""; ap2 = sep.segundo_apellido||""; nom1 = sep.primer_nombre||""; nom2 = sep.otros_nombres||""; razon = "";
+        } else if(!esJur){ razon = ""; }
         var d = {es_juridica:esJur, razon_social:razon, primer_apellido:ap1, segundo_apellido:ap2, primer_nombre:nom1, otros_nombres:nom2};
         var nombre = nombreCompletoTercero(d);
         if(!nombre) return;
         var ident = String(row["Número identificación"]||"").trim();
-        var tipoDoc = String(row["Tipo DE DOCUMENTO"]||"31").trim();
         var tipo = String(row["Tipo"]||"proveedor").trim().toLowerCase();
         if(TIPOS_VALIDOS.indexOf(tipo)<0) tipo="proveedor";
-        var sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
+        // Encabezado nuevo "¿Aplica retención? (SI/NO)": SI = se le practica retención.
+        // Se sigue leyendo el encabezado anterior "Sin retención (SI/NO)" (valor invertido).
+        var sinRet;
+        if(row["¿Aplica retención? (SI/NO)"]!==undefined) sinRet = /^n/i.test(String(row["¿Aplica retención? (SI/NO)"]||""));
+        else sinRet = /^s/i.test(String(row["Sin retención (SI/NO)"]||""));
         var conc = String(row["Concepto retención (compras/arrendamientos/servicios_publicos/fletes/seguros/afiliaciones/publicidad/diversos)"]||"").trim().toLowerCase()
           .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"_");
         if(CONCEPTOS_RETENCION.map(function(cr){return cr[0];}).indexOf(conc)<0) conc="";
