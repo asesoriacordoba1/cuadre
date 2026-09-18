@@ -1607,7 +1607,7 @@ function handleImportFile(file){
 // Una razón social se reconoce por su sigla legal: S.A.S., SAS, S.A., SA,
 // LTDA, S en C, & CIA, E.S.P., E.U., en liquidación, sucursal, etc.
 function nombreEsDeEmpresa(nombre){
-  var s = " " + String(nombre||"").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+  var s = " " + String(nombre||"").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .replace(/\./g,"").replace(/&/g," & ").replace(/[^A-Z0-9&]+/g," ").replace(/\s+/g," ").trim() + " ";
   return / (SAS|S A S|SA|S A|LTDA|LIMITADA|SCA|S C A|S EN C|ESP|E S P|EU|SUCURSAL|LIQUIDACION|COOPERATIVA|FUNDACION|ASOCIACION|CORPORACION) /.test(s) || /( Y | & )CIA /.test(s) || / CIA /.test(s);
 }
