@@ -2480,6 +2480,7 @@ function formulario350HTML(per){
   var list = S.comprobantes.filter(function(c){ return c.periodo===per && (c.tipo==="FC" || c.tipo==="CE"); });
   var buckets = {arrPJ:{base:0,ret:0}, arrPN:{base:0,ret:0}, compPJ:{base:0,ret:0}, compPN:{base:0,ret:0}};
   var sinClasificar = {base:0, ret:0, items:[]};
+  var detalle350 = [];
   var reteIvaTotal = 0;
   list.forEach(function(c){
     var esDC = /^Descuento Condicionado/.test(c.descripcion||"");
@@ -2501,14 +2502,20 @@ function formulario350HTML(per){
       });
       if(!base) base = c.total_debito||0;
     }
+    var tipoDocTxt = c.tipo==="CE" ? "Documento soporte" : (/^Nota Cr/.test(c.descripcion||"") ? "Nota de crédito electrónica" : "Factura electrónica");
+    var filaDet = {nit: tMatch ? (tMatch.identificacion||"") : "", tercero: nombre, fecha: c.fecha, tipoDoc: tipoDocTxt, doc: extractDocRefFromDescripcion(c.descripcion), base: base, ret: montoRet};
     if(!tMatch){
       sinClasificar.base+=base; sinClasificar.ret+=montoRet; sinClasificar.items.push(nombre);
+      filaDet.sec = "sin"; detalle350.push(filaDet);
       return;
     }
     var key = (esArriendo?"arr":"comp") + (tMatch.es_juridica?"PJ":"PN");
     buckets[key].base += base;
     buckets[key].ret += montoRet;
+    filaDet.sec = key; detalle350.push(filaDet);
   });
+  detalle350.sort(function(a,b){ return (a.tercero||"").localeCompare(b.tercero||"") || (a.fecha||"").localeCompare(b.fecha||""); });
+  S._det350 = {per: per, filas: detalle350};
   var c33=buckets.arrPJ.base, c46=buckets.arrPJ.ret;
   var c83=buckets.arrPN.base, c99=buckets.arrPN.ret;
   var c36=buckets.compPJ.base, c49=buckets.compPJ.ret;
@@ -2540,9 +2547,69 @@ function formulario350HTML(per){
       filaFormHTML(136,"Total retenciones",c136) +
       filaFormHTML(138,"Total retenciones más sanciones",c138) +
     '</tbody></table></div>' +
-    '<p class="small" style="margin-top:14px">No incluye honorarios, comisiones, servicios, rendimientos financieros ni pagos al exterior — Cuadre hoy solo calcula retención automática por compras y arrendamientos. Si el cliente tiene otros conceptos, decláralos aparte.</p>' +
+    detalle350HTML(detalle350) +
+    '<p class="small" style="margin-top:14px">No incluye honorarios, comisiones, servicios, rendimientos financieros ni pagos al exterior — Cuadre hoy solo calcula retención automática por compras y arrendamientos. Si el cliente tiene otros conceptos, decláralos aparte. Las notas crédito de compra restan de la base y la retención (aparecen en negativo).</p>' +
   '</div>';
   return html;
+}
+var SECCIONES_350 = [
+  ["compPJ","Compras — Persona jurídica (2,5%)","36 / 49"],
+  ["compPN","Compras — Persona natural","86 / 102"],
+  ["arrPJ","Arrendamientos — Persona jurídica","33 / 46"],
+  ["arrPN","Arrendamientos — Persona natural (sin umbral)","83 / 99"],
+  ["sin","Sin clasificar (tercero no reconocido)","—"]
+];
+function detalle350HTML(filas){
+  var out = '<div style="display:flex;align-items:center;justify-content:space-between;margin:22px 0 6px"><div class="small" style="font-weight:600">Detalle por documento</div><button class="btn btn-outline btn-sm" onclick="app.exportar350()">Descargar Excel del detalle</button></div>';
+  SECCIONES_350.forEach(function(sec){
+    var f = filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var tb=0, tr=0;
+    var rows = f.map(function(x){
+      tb+=x.base; tr+=x.ret;
+      return '<tr><td class="mono">'+esc(x.nit)+'</td><td>'+esc(x.tercero)+'</td><td>'+fmtDate(x.fecha)+'</td><td>'+esc(x.tipoDoc)+'</td><td class="mono">'+esc(x.doc)+'</td><td class="num">'+fmtCOP(x.base)+'</td><td class="num">'+fmtCOP(x.ret)+'</td></tr>';
+    }).join("");
+    out += '<div class="small" style="font-weight:600;margin:14px 0 6px">'+esc(sec[1])+' · casillas '+sec[2]+' · '+f.length+' documento(s)</div>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th>NIT</th><th>Tercero</th><th>Fecha</th><th>Tipo de documento</th><th>N° documento</th><th class="num">Base</th><th class="num">Retención</th></tr></thead><tbody>'+rows+
+      '<tr style="font-weight:700"><td colspan="5">Total</td><td class="num">'+fmtCOP(tb)+'</td><td class="num">'+fmtCOP(tr)+'</td></tr></tbody></table></div>';
+  });
+  return out;
+}
+function exportar350(){
+  var d = S._det350;
+  if(!d || !d.filas) return;
+  var e = currentEmpresa();
+  var aoa = [
+    [(e?e.nombre:"")+" - RETENCIÓN EN LA FUENTE"],
+    [periodoLabel(d.per)+" · Base para el Formulario 350 (Declaración mensual de retención en la fuente)"],
+    [],
+    ["RESUMEN PARA FORMULARIO 350"],
+    ["Concepto","Casilla base","Base","Casilla retención","Retención"]
+  ];
+  var totB=0, totR=0;
+  SECCIONES_350.forEach(function(sec){
+    var f = d.filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var b=0, r=0; f.forEach(function(x){ b+=x.base; r+=x.ret; });
+    totB+=b; totR+=r;
+    var cas = sec[2].split(" / ");
+    aoa.push([sec[1], cas[0]||"", b, cas[1]||"", r]);
+  });
+  aoa.push(["TOTAL","",totB,"",totR]);
+  SECCIONES_350.forEach(function(sec){
+    var f = d.filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var b=0, r=0;
+    aoa.push([]); aoa.push(["DETALLE - "+sec[1].toUpperCase()]);
+    aoa.push(["NIT","Tercero","Fecha","Tipo Documento","N° documento","Base","Retención"]);
+    f.forEach(function(x){ b+=x.base; r+=x.ret; aoa.push([x.nit, x.tercero, fmtDate(x.fecha), x.tipoDoc, x.doc, x.base, x.ret]); });
+    aoa.push(["","","","","Total",b,r]);
+  });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:14},{wch:46},{wch:12},{wch:28},{wch:16},{wch:16},{wch:14}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, ("F350 "+periodoLabel(d.per)).slice(0,31));
+  XLSX.writeFile(wb, "retencion_350_"+(e?e.nombre.replace(/[^a-z0-9]+/gi,"_"):"cuadre")+"_"+d.per+".xlsx");
 }
 
 function libroDiarioHTML(per){
@@ -3199,6 +3266,7 @@ window.app = {
     if(err){ alert(err); return; }
     render();
   },
+  exportar350: exportar350,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
   marcarIngresoVenta: function(i, concepto){
     var r = S.importRows && S.importRows[i];
