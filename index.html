@@ -847,7 +847,7 @@ function handleTercerosImportFile(file){
         // El tipo de documento manda: 31 = NIT (persona jurídica); cualquier
         // otro (13 cédula, 22 extranjería, 41 pasaporte, 47/48...) = persona natural.
         // Si viene vacío, se deduce de si hay razón social o nombres.
-        var esJur = tipoDocRaw ? tipoDocRaw==="31" : !!razon;
+        var esJur = tipoDocRaw ? tipoDocRaw==="31" : (!!razon || nombreEsDeEmpresa([ap1,ap2,nom1,nom2].join(" ")));
         var partesNom = [ap1, ap2, nom1, nom2].filter(Boolean);
         if(esJur && !razon){ razon = partesNom.join(" "); ap1 = ap2 = nom1 = nom2 = ""; }
         else if(!esJur && !partesNom.length && razon){
@@ -1604,9 +1604,16 @@ function handleImportFile(file){
 // 9 digitos que empieza por 8 o 9 es una empresa (tipo 31); cualquier otro
 // numero es una cedula, o sea persona natural (tipo 13), y su nombre viene
 // con los apellidos primero, asi que se separa en apellidos y nombres.
+// Una razón social se reconoce por su sigla legal: S.A.S., SAS, S.A., SA,
+// LTDA, S en C, & CIA, E.S.P., E.U., en liquidación, sucursal, etc.
+function nombreEsDeEmpresa(nombre){
+  var s = " " + String(nombre||"").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/\./g,"").replace(/&/g," & ").replace(/[^A-Z0-9&]+/g," ").replace(/\s+/g," ").trim() + " ";
+  return / (SAS|S A S|SA|S A|LTDA|LIMITADA|SCA|S C A|S EN C|ESP|E S P|EU|SUCURSAL|LIQUIDACION|COOPERATIVA|FUNDACION|ASOCIACION|CORPORACION) /.test(s) || /( Y | & )CIA /.test(s) || / CIA /.test(s);
+}
 function datosTerceroDesdeDian(nombre, nit){
   var n = normNit(nit);
-  var esEmpresa = n.length===9 && (n.charAt(0)==="8" || n.charAt(0)==="9");
+  var esEmpresa = nombreEsDeEmpresa(nombre) || (n.length===9 && (n.charAt(0)==="8" || n.charAt(0)==="9"));
   if(esEmpresa) return {es_juridica:true, tipo_documento:"31", razon_social:nombre};
   var p = String(nombre||"").trim().split(/\s+/).filter(Boolean);
   var d = {es_juridica:false, tipo_documento:"13", razon_social:""};
