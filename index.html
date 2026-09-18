@@ -193,6 +193,7 @@ a.link:hover{text-decoration:underline}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 (function(){
 "use strict";
@@ -1328,6 +1329,144 @@ function rebuildDevolucionDesdeFactura(facturaOriginal, ncTotal, docRefBuscado){
       credito: Math.round((Number(l.debito)||0)*ratio)
     };
   });
+}
+function xmlTag(t, tag){
+  var m = t.match(new RegExp("<(?:\\w+:)?"+tag+"(?:\\s[^>]*)?>([^<]*)</(?:\\w+:)?"+tag+">"));
+  return m ? m[1].trim() : "";
+}
+function xmlEnt(x){ return String(x||"").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'"); }
+function parseNotaCreditoXml(text){
+  if(/<(?:\w+:)?AttachedDocument[\s>]/.test(text) && !/<(?:\w+:)?CreditNote[\s>]/.test(text.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g,""))){
+    var cd = text.match(/<!\[CDATA\[([\s\S]*?<(?:\w+:)?CreditNote[\s>][\s\S]*?)\]\]>/);
+    if(cd) text = cd[1];
+  }
+  if(!/<(?:\w+:)?CreditNote[\s>]/.test(text)) return null;
+  var body = text.replace(/<(?:\w+:)?BillingReference>[\s\S]*?<\/(?:\w+:)?BillingReference>/, "");
+  var ref = "";
+  var br = text.match(/<(?:\w+:)?BillingReference>([\s\S]*?)<\/(?:\w+:)?BillingReference>/);
+  if(br) ref = xmlEnt(xmlTag(br[1], "ID"));
+  var dr = text.match(/<(?:\w+:)?DiscrepancyResponse>([\s\S]*?)<\/(?:\w+:)?DiscrepancyResponse>/);
+  var notas = [], mn, reNota = /<(?:\w+:)?Note(?:\s[^>]*)?>([^<]*)<\/(?:\w+:)?Note>/g;
+  while((mn = reNota.exec(text))) notas.push(xmlEnt(mn[1]));
+  var notaTxt = notas.join(" | ");
+  var concepto = dr ? xmlEnt(xmlTag(dr[1], "Description")) : "";
+  if(!concepto){
+    var it = text.match(/<(?:\w+:)?Item>\s*<(?:\w+:)?Description>([^<]*)</);
+    if(it) concepto = xmlEnt(it[1]).trim();
+  }
+  var refIgnorada = "";
+  if(ref && /sin\s+factura/i.test(notaTxt)){ refIgnorada = ref; ref = ""; }
+  if(!ref){
+    var af = notaTxt.match(/afecta\s+factura\s+([A-Za-z0-9\-]+)/i);
+    if(af) ref = af[1];
+  }
+  return {
+    id: xmlEnt(xmlTag(body, "ID")),
+    cude: xmlTag(body, "UUID"),
+    ref: ref,
+    refIgnorada: refIgnorada,
+    codigo: dr ? xmlTag(dr[1], "ResponseCode") : "",
+    concepto: concepto,
+    tipoOp: xmlTag(text, "CustomizationID")
+  };
+}
+function leerArchivoComoTexto(file){
+  return new Promise(function(res, rej){
+    var fr = new FileReader();
+    fr.onload = function(){ res(fr.result); };
+    fr.onerror = function(){ rej(new Error("No se pudo leer "+file.name)); };
+    fr.readAsText(file, "UTF-8");
+  });
+}
+async function extraerXmlsDeArchivos(files){
+  var textos = [];
+  for(var k=0;k<files.length;k++){
+    var f = files[k];
+    if(/\.zip$/i.test(f.name)){
+      if(typeof JSZip==="undefined") throw new Error("No se cargó el lector de ZIP. Recarga la página (Ctrl+F5) o sube los .xml sueltos.");
+      var zip = await JSZip.loadAsync(f);
+      var nombres = Object.keys(zip.files).filter(function(n){ return /\.xml$/i.test(n) && !zip.files[n].dir; });
+      for(var j=0;j<nombres.length;j++) textos.push(await zip.files[nombres[j]].async("string"));
+    } else if(/\.xml$/i.test(f.name)){
+      textos.push(await leerArchivoComoTexto(f));
+    }
+  }
+  return textos;
+}
+function aplicarVinculoNC(i, folio){
+  var r = S.importRows && S.importRows[i];
+  if(!r) return "Fila no encontrada.";
+  var encontrada = buscarFacturaOriginal(folio, r.tercNombre);
+  if(!encontrada) return 'No encontré ninguna Factura de Compra guardada con el número "'+folio+'" para '+r.tercNombre+'. Revisa que esté bien escrito o que esa factura ya se haya importado antes.';
+  if(encontrada._ambiguo) return "Encontré más de una factura con ese número para distintos terceros. Avísame para revisarlo a mano.";
+  var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folio);
+  if(!nuevasLineas) return "La factura encontrada no tiene un total válido para calcular la proporción.";
+  if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
+  r.lineas = nuevasLineas;
+  r.descripcion = r._descripcionOriginal;
+  r.esNCEstado = "vinculada";
+  r.ncFacturaRef = folio;
+  var tot = totalsOf(r.lineas);
+  r.debeCuadra = Math.abs(tot.d-tot.c)<1;
+  return "";
+}
+async function cargarXmlNotasCredito(files){
+  S.xmlBusy = true; S.xmlResumen = ""; render();
+  try{
+    var textos = await extraerXmlsDeArchivos(files);
+    var vistos = {}, notas = [];
+    textos.forEach(function(t){
+      var n = parseNotaCreditoXml(t);
+      if(!n) return;
+      var clave = n.cude || n.id;
+      if(vistos[clave]) return;
+      vistos[clave] = true; notas.push(n);
+    });
+    var stats = {vinc:0, dev:0, desc:0, sinRef:0, refNoEnc:0, sinFila:0, ventas:0, manual:0};
+    var avisos = [];
+    notas.forEach(function(n){
+      var idx = -1;
+      (S.importRows||[]).forEach(function(r, i){
+        if(idx>=0 || !r.esNC) return;
+        if((n.cude && r.cufe===n.cude) || (n.id && extractDocRefFromDescripcion(r.descripcion).toUpperCase().replace(/\s+/g,"")===n.id.toUpperCase().replace(/\s+/g,""))) idx = i;
+      });
+      if(idx<0){ stats.sinFila++; return; }
+      var r = S.importRows[idx];
+      if(r.esVenta){ stats.ventas++; return; }
+      if(r.dup) return;
+      var info = [];
+      var hecho = false;
+      if(/descuento\s+condicionado/i.test(n.concepto)){
+        app.marcarDescuentoCondicionado(idx, true); stats.desc++; hecho = true;
+        info.push(n.ref ? "XML: afecta la factura "+n.ref : "XML: nota sin factura referenciada");
+      } else if(n.ref){
+        var err = aplicarVinculoNC(idx, n.ref);
+        if(!err){ stats.vinc++; hecho = true; info.push("XML: afecta la factura "+n.ref); }
+        else { stats.refNoEnc++; info.push("XML: afecta la factura "+n.ref+" (no está guardada en Cuadre todavía)"); avisos.push(r.tercNombre+" "+n.id+" → factura "+n.ref); }
+      } else {
+        stats.sinRef++; info.push("XML: nota sin factura referenciada"+(n.refIgnorada?" (la referencia "+n.refIgnorada+" es de relleno: la nota dice \"sin factura\")":""));
+      }
+      if(!hecho){
+        if(/descuento/i.test(n.concepto)){ app.marcarDescuentoCondicionado(idx, true); stats.desc++; hecho = true; }
+        else if(n.codigo==="1" || n.codigo==="2" || (!n.ref && !n.codigo)){ app.marcarDevolucionSinRetencion(idx, true); stats.dev++; hecho = true; }
+        else stats.manual++;
+      }
+      if(n.concepto) info.push("concepto: "+n.concepto);
+      r.xmlInfo = info.join(" · ");
+    });
+    var partes = [notas.length+" nota(s) crédito leída(s) del XML."];
+    if(stats.vinc) partes.push(stats.vinc+" vinculada(s) a su factura con reverso exacto.");
+    if(stats.desc) partes.push(stats.desc+" marcada(s) como descuento condicionado.");
+    if(stats.dev) partes.push(stats.dev+" marcada(s) como devolución sin factura.");
+    if(stats.refNoEnc) partes.push(stats.refNoEnc+" traen una factura que no encontré en Cuadre (importa primero esa factura y vuelve a cargar el XML): "+avisos.join("; ")+".");
+    if(stats.manual) partes.push(stats.manual+" quedaron sin clasificar: elige el tipo a mano.");
+    if(stats.sinFila) partes.push(stats.sinFila+" XML no corresponden a ninguna nota de este listado.");
+    if(stats.ventas) partes.push(stats.ventas+" son notas de venta (no se modificaron).");
+    S.xmlResumen = partes.join(" ");
+  }catch(err){
+    S.xmlResumen = "No se pudo leer el XML: "+err.message;
+  }
+  S.xmlBusy = false; render();
 }
 function handleImportFile(file){
   S.importBusy=true; S.importErr=""; S.importRows=null; render();
@@ -2504,6 +2643,12 @@ function importarHTML(e){
         return S.importSortDir<0 ? -d : d;
       });
     }
+    body += '<div class="card card-pad" style="margin-top:18px"><div class="section-title">Notas crédito: leer el XML (opcional)</div>' +
+      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto. Descarga el <b>XML</b> de cada nota desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. Cuadre vincula la factura y marca el tipo de cada nota automáticamente.</p>' +
+      '<input type="file" accept=".xml,.zip" multiple onchange="app.cargarXmlNC(this.files)">' +
+      (S.xmlBusy? '<div class="loading"><div class="spin"></div>Leyendo XML…</div>' : "") +
+      (S.xmlResumen? '<div class="small" style="margin-top:10px">'+esc(S.xmlResumen)+'</div>' : "") +
+    '</div>';
     var rows = indicesOrden.map(function(i){
       var r = S.importRows[i];
       var flags = "";
@@ -2523,6 +2668,7 @@ function importarHTML(e){
         if(estado!=="con_retencion") links.push('<a class="link" onclick="app.marcarAfectaRetencion('+i+')">Afecta factura con retención</a>');
         if(estado) links.push('<a class="link" onclick="app.marcarAfectaFactura('+i+')">deshacer</a>');
         ncToggle = '<br>' + chip + links.join(' · ');
+        if(r.xmlInfo) ncToggle += '<br><span class="small" style="color:var(--good,#2a7)">'+esc(r.xmlInfo)+'</span>';
         if(estado!=="vinculada"){
           var vincId = "nc-ref-"+i;
           ncToggle += '<br><span class="small">N° de factura que afecta: <input id="'+vincId+'" style="width:110px;padding:3px 6px;font-size:12px" placeholder="ej. FC450" onkeydown="if(event.key===\'Enter\')app.vincularNCFactura('+i+',\''+vincId+'\')"> <a class="link" onclick="app.vincularNCFactura('+i+',\''+vincId+'\')">Vincular y reversar exacto</a></span>';
@@ -2919,7 +3065,7 @@ window.app = {
     else { S.importSortKey = key; S.importSortDir = 1; }
     render();
   },
-  marcarDescuentoCondicionado: function(i){
+  marcarDescuentoCondicionado: function(i, silencioso){
     var r = S.importRows && S.importRows[i];
     if(!r) return;
     if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
@@ -2930,9 +3076,9 @@ window.app = {
     r.descripcion = r._descripcionOriginal.replace(/^Nota Crédito - /, "Descuento Condicionado - ");
     r.esNCEstado = "descuento";
     r.debeCuadra = true;
-    render();
+    if(!silencioso) render();
   },
-  marcarDevolucionSinRetencion: function(i){
+  marcarDevolucionSinRetencion: function(i, silencioso){
     var r = S.importRows && S.importRows[i];
     if(!r) return;
     if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
@@ -2942,7 +3088,7 @@ window.app = {
     r.descripcion = r._descripcionOriginal;
     r.esNCEstado = "sin_retencion";
     r.debeCuadra = true;
-    render();
+    if(!silencioso) render();
   },
   marcarAfectaRetencion: function(i){
     var r = S.importRows && S.importRows[i];
@@ -2972,20 +3118,11 @@ window.app = {
     var el = document.getElementById(inputId);
     var folio = ((el && el.value) || "").trim();
     if(!folio){ alert("Escribe el número de la factura de compra que afecta esta nota crédito."); return; }
-    var encontrada = buscarFacturaOriginal(folio, r.tercNombre);
-    if(!encontrada){ alert('No encontré ninguna Factura de Compra guardada con el número "'+folio+'" para '+r.tercNombre+'. Revisa que esté bien escrito o que esa factura ya se haya importado antes.'); return; }
-    if(encontrada._ambiguo){ alert("Encontré más de una factura con ese número para distintos terceros. Avísame para revisarlo a mano."); return; }
-    var nuevasLineas = rebuildDevolucionDesdeFactura(encontrada, r.total, folio);
-    if(!nuevasLineas){ alert("La factura encontrada no tiene un total válido para calcular la proporción."); return; }
-    if(!r._lineasOriginal){ r._lineasOriginal = r.lineas; r._descripcionOriginal = r.descripcion; }
-    r.lineas = nuevasLineas;
-    r.descripcion = r._descripcionOriginal;
-    r.esNCEstado = "vinculada";
-    r.ncFacturaRef = folio;
-    var tot = totalsOf(r.lineas);
-    r.debeCuadra = Math.abs(tot.d-tot.c)<1;
+    var err = aplicarVinculoNC(i, folio);
+    if(err){ alert(err); return; }
     render();
   },
+  cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
   marcarIngresoVenta: function(i, concepto){
     var r = S.importRows && S.importRows[i];
     if(!r || !r.esVenta) return;
