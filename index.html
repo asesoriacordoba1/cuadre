@@ -565,8 +565,20 @@ function agruparPorMayor(items, campos){
 }
 
 /* ---------- create empresa ---------- */
-async function crearEmpresa(nombre, nit, sector, grupo){
-  var ins = await sb.from("empresas").insert({nombre:nombre, nit:nit, sector:sector, grupo_niif:grupo, creada:todayISO(), demo:false}).select().single();
+async function guardarEdicionEmpresa(id, d){
+  var cambios = {nombre:d.nombre, nit:d.nit, sector:d.sector, grupo_niif:d.grupo_niif, responsabilidades:d.responsabilidades,
+    direccion:d.direccion, ciudad:d.ciudad, departamento:d.departamento, correo:d.correo, telefono:d.telefono};
+  var res = await sb.from("empresas").update(cambios).eq("id", id);
+  if(res.error){ alert("No se pudo guardar: "+res.error.message); return; }
+  var e = S.empresas.find(function(x){ return x.id===id; });
+  if(e) Object.assign(e, cambios);
+  closeModal();
+  render();
+}
+async function crearEmpresa(nombre, nit, sector, grupo, extra){
+  extra = extra || {};
+  var ins = await sb.from("empresas").insert({nombre:nombre, nit:nit, sector:sector, grupo_niif:grupo, creada:todayISO(), demo:false,
+    responsabilidades:extra.responsabilidades||[], direccion:extra.direccion||"", ciudad:extra.ciudad||"", departamento:extra.departamento||"", correo:extra.correo||"", telefono:extra.telefono||""}).select().single();
   if(ins.error){ alert("No se pudo crear la empresa: "+ins.error.message); return; }
   var id = ins.data.id;
   var rows = PUC.map(function(row){ return {empresa_id:id, codigo:row[0], nombre:row[1], tipo:row[2], nivel:row[3], naturaleza:naturaleza(row[2],!!row[4]), postable:esPostable(row[0])}; });
@@ -2066,6 +2078,7 @@ function sidebarHTML(){
       '<label>Empresa activa</label>' +
       (S.empresas.length ? '<select onchange="app.pickEmpresa(this.value)">'+opts+'</select>' : '<div class="small">Aún no tienes empresas</div>') +
       meta +
+      (e ? '<button class="btn-ghost-sm" style="margin-bottom:6px" onclick="app.openEditarEmpresa()">Editar empresa</button>' : "") +
       '<button class="btn-ghost-sm" onclick="app.openNuevaEmpresa()">+ Nueva empresa</button>' +
     '</div>' +
     '<div class="nav">' +
@@ -2635,6 +2648,7 @@ function formulario300HTML(per){
   var html = '<div class="card card-pad">' +
     '<div class="section-title">Declaración IVA — Formulario 300 · '+esc(bim.label)+'</div>' +
     '<p class="small">Bimestral · Periodo DIAN '+bim.codigo+' · Calculado a partir de los comprobantes de '+periodoLabel(bim.periodos[0])+' y '+periodoLabel(bim.periodos[1])+'.</p>' +
+    avisoResponsabilidadHTML("iva","Responsable de IVA") +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">INGRESOS (VENTAS)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
       filaFormHTML(28,"Por operaciones gravadas a la tarifa general",c28) +
@@ -2776,6 +2790,7 @@ function formulario350HTML(per){
   var html = '<div class="card card-pad">' +
     '<div class="section-title">Declaración de Retención en la Fuente — Formulario 350 · '+esc(periodoLabel(per))+'</div>' +
     '<p class="small">Mensual · Calculado a partir de los comprobantes de compra de '+esc(periodoLabel(per))+' (no incluye devoluciones).</p>' +
+    avisoResponsabilidadHTML("retenedor","Agente retenedor en la fuente") +
     alerta +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">A título de renta — Compras</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla base</th><th class="num">Base</th><th style="text-align:center">Casilla ret.</th><th class="num">Retención</th></tr></thead><tbody>' +
@@ -3141,21 +3156,63 @@ function importarHTML(e){
 }
 
 /* ---------- modals: empresa ---------- */
-function nuevaEmpresaModal(){
-  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal"><div class="modal-head"><h3>Nueva empresa</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
+var RESPONSABILIDADES_EMPRESA = [
+  ["iva","Responsable de IVA","(48) Presenta el Formulario 300"],
+  ["retenedor","Agente retenedor en la fuente","(07) Presenta el Formulario 350"],
+  ["autorretenedor","Autorretenedor","(O-15)"],
+  ["simple","Régimen simple de tributación","(O-47)"],
+  ["gran_contribuyente","Gran contribuyente","(O-13)"],
+  ["facturador","Facturador electrónico","(52)"]
+];
+function empresaModal(e){
+  e = e || {};
+  var resp = Array.isArray(e.responsabilidades) ? e.responsabilidades : [];
+  var v = function(x){ return esc(x||""); };
+  return '<div class="modal-back" onclick="app.backdropClose(event)"><div class="modal"><div class="modal-head"><h3>'+(e.id?"Editar empresa":"Nueva empresa")+'</h3><button class="modal-x" onclick="app.closeModal()">✕</button></div>' +
   '<div class="modal-body">' +
-    '<div class="field"><label>Nombre o razón social</label><input id="f-nombre" placeholder="Ej. Comercializadora XYZ S.A.S."></div>' +
+    '<div class="field"><label>Nombre o razón social</label><input id="f-nombre" value="'+v(e.nombre)+'" placeholder="Ej. Comercializadora XYZ S.A.S."></div>' +
     '<div class="field-row">' +
-      '<div class="field"><label>NIT</label><input id="f-nit" placeholder="900123456-7"></div>' +
-      '<div class="field"><label>Sector</label><input id="f-sector" placeholder="Comercio, servicios, manufactura…"></div>' +
+      '<div class="field"><label>NIT</label><input id="f-nit" value="'+v(e.nit)+'" placeholder="900123456-7"></div>' +
+      '<div class="field"><label>Sector</label><input id="f-sector" value="'+v(e.sector)+'" placeholder="Comercio, servicios, manufactura…"></div>' +
     '</div>' +
     '<div class="field"><label>Grupo NIIF</label><div class="radio-group">' +
-      [1,2,3].map(function(g){return '<div class="radio-opt'+(g===2?" sel":"")+'" id="niif-'+g+'" onclick="app.pickNiif('+g+')">Grupo '+g+'</div>';}).join('') +
+      [1,2,3].map(function(g){return '<div class="radio-opt'+(g===pendingNiif?" sel":"")+'" id="niif-'+g+'" onclick="app.pickNiif('+g+')">Grupo '+g+'</div>';}).join('') +
     '</div><div class="small" style="margin-top:6px">1: emisores de valores/interés público · 2: PYMES (la mayoría de tus clientes) · 3: microempresas</div></div>' +
+    '<div class="field"><label>Responsabilidades fiscales (según el RUT)</label>' +
+      RESPONSABILIDADES_EMPRESA.map(function(r){
+        return '<label style="display:flex;gap:8px;align-items:center;font-weight:400;margin:4px 0"><input type="checkbox" id="f-resp-'+r[0]+'" '+(resp.indexOf(r[0])>=0?"checked":"")+'> '+esc(r[1])+' <span class="small">'+esc(r[2])+'</span></label>';
+      }).join("") +
+      '<div class="small" style="margin-top:4px">Con esto Cuadre sabe si la empresa declara IVA (300) y retención (350), y avisa en los formularios si no aplican.</div></div>' +
+    '<div class="field"><label>Dirección</label><input id="f-direccion" value="'+v(e.direccion)+'" placeholder="Cra 5 # 10-20"></div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label>Ciudad</label><input id="f-ciudad" value="'+v(e.ciudad)+'" placeholder="Montería"></div>' +
+      '<div class="field"><label>Departamento</label><input id="f-departamento" value="'+v(e.departamento)+'" placeholder="Córdoba"></div>' +
+    '</div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label>Correo electrónico</label><input id="f-correo" type="email" value="'+v(e.correo)+'" placeholder="contacto@empresa.com"></div>' +
+      '<div class="field"><label>Teléfono</label><input id="f-telefono" value="'+v(e.telefono)+'" placeholder="300 000 0000"></div>' +
+    '</div>' +
   '</div>' +
-  '<div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitNuevaEmpresa()">Crear empresa</button></div>' +
+  '<div class="modal-foot"><button class="btn btn-outline" onclick="app.closeModal()">Cancelar</button><button class="btn" onclick="app.submitNuevaEmpresa()">'+(e.id?"Guardar cambios":"Crear empresa")+'</button></div>' +
   '</div></div>';
 }
+function nuevaEmpresaModal(){ return empresaModal(null); }
+function datosEmpresaDelFormulario(){
+  var g = function(id){ var el = document.getElementById(id); return el ? el.value.trim() : ""; };
+  return {
+    nombre:g("f-nombre"), nit:g("f-nit"), sector:g("f-sector"), grupo_niif:pendingNiif,
+    responsabilidades: RESPONSABILIDADES_EMPRESA.filter(function(r){ var c=document.getElementById("f-resp-"+r[0]); return c && c.checked; }).map(function(r){return r[0];}),
+    direccion:g("f-direccion"), ciudad:g("f-ciudad"), departamento:g("f-departamento"), correo:g("f-correo"), telefono:g("f-telefono")
+  };
+}
+// Avisos según lo declarado en el RUT (solo si la empresa ya tiene responsabilidades registradas).
+function avisoResponsabilidadHTML(clave, etiqueta){
+  var e = currentEmpresa();
+  if(!e || !Array.isArray(e.responsabilidades) || !e.responsabilidades.length) return "";
+  if(e.responsabilidades.indexOf(clave)>=0) return "";
+  return '<p class="small" style="background:var(--warn-bg,#fff4e0);padding:8px 10px;border-radius:8px">'+esc(e.nombre)+' no tiene marcada la responsabilidad <b>'+esc(etiqueta)+'</b> en su ficha, así que normalmente no presenta este formulario. Si sí la tiene, actualízala en <b>Editar empresa</b>.</p>';
+}
+var pendingEditEmpresaId = null;
 var pendingNiif=2;
 
 var REGIMENES = ["","Persona Jurídica","Gran Contribuyente","Persona Natural Responsable de IVA","Persona Natural No Responsable de IVA","Regimen simple de tributacion"];
@@ -3307,14 +3364,22 @@ window.app = {
   closeModal: closeModal,
   logout: doLogout,
 
-  openNuevaEmpresa: function(){ pendingNiif=2; openModal(nuevaEmpresaModal()); },
-  pickNiif: function(g){ pendingNiif=g; openModal(nuevaEmpresaModal()); },
+  openNuevaEmpresa: function(){ pendingEditEmpresaId=null; pendingNiif=2; openModal(empresaModal(null)); },
+  openEditarEmpresa: function(){
+    var e = currentEmpresa(); if(!e) return;
+    pendingEditEmpresaId = e.id; pendingNiif = e.grupo_niif || 2;
+    openModal(empresaModal(e));
+  },
+  // Solo marca la opción: no se vuelve a dibujar el formulario para no borrar lo escrito.
+  pickNiif: function(g){
+    pendingNiif = g;
+    [1,2,3].forEach(function(n){ var el=document.getElementById("niif-"+n); if(el) el.className = "radio-opt"+(n===g?" sel":""); });
+  },
   submitNuevaEmpresa: function(){
-    var n=document.getElementById("f-nombre").value.trim();
-    var nit=document.getElementById("f-nit").value.trim();
-    var sec=document.getElementById("f-sector").value.trim();
-    if(!n){ alert("Escribe el nombre de la empresa."); return; }
-    crearEmpresa(n,nit,sec,pendingNiif);
+    var d = datosEmpresaDelFormulario();
+    if(!d.nombre){ alert("Escribe el nombre de la empresa."); return; }
+    if(pendingEditEmpresaId){ guardarEdicionEmpresa(pendingEditEmpresaId, d); return; }
+    crearEmpresa(d.nombre, d.nit, d.sector, pendingNiif, d);
   },
   crearDemo: crearEmpresaDemo,
   eliminarDemo: eliminarEmpresaDemo,
