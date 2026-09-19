@@ -1755,6 +1755,7 @@ function datosTerceroDesdeDian(nombre, nit){
   return d;
 }
 async function confirmImport(){
+  if(S.importBusy) return; // ya hay una importación en curso: no se permite iniciar otra
   var rows = (S.importRows||[]).filter(function(r){return r.include && r.debeCuadra;});
   if(!rows.length){ alert("No hay filas seleccionadas para importar."); return; }
   var invalidas = rows.filter(function(r){ return !validarSubcuentas(r.lineas); });
@@ -1804,7 +1805,7 @@ async function confirmImport(){
   var CHUNK=500, done=0;
   for(var i=0;i<toInsert.length;i+=CHUNK){
     var batch = toInsert.slice(i, i+CHUNK);
-    var res = await sb.from("comprobantes").insert(batch);
+    var res = await sb.from("comprobantes").upsert(batch, {onConflict:"empresa_id,cufe", ignoreDuplicates:true});
     if(res.error){
       S.importBusy=false; render();
       alert("Se importaron "+done+" de "+toInsert.length+" antes de un error: "+res.error.message+". Los ya importados quedaron guardados; puedes reintentar con el resto más tarde.");
@@ -3051,7 +3052,7 @@ function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
     '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor esté registrado en <a class="link" onclick="app.setTab(\'terceros\')">Terceros</a> con Tipo <b>proveedor</b> se clasifican como compra de mercancía. Las que estén registradas con Tipo <b>personal</b> se marcan de una vez como gasto personal y quedan desmarcadas para que no las importes por accidente. Cualquier otro NIT (no registrado, o registrado como cliente/empleado/otro) se marca como <b>Diverso</b> — no significa que sea personal, solo que falta clasificar — y se importa igual en la cuenta genérica (5195) para que lo revises después en Comprobantes. Al confirmar la importación, los NIT de clientes y proveedores que no existan todavía en Terceros se registran automáticamente ahí: los de ventas como <b>Cliente</b>, los de compras como <b>Otro</b> (Diversos) — revísalos y reclasifícalos si hace falta.</p>' +
-    '<input type="file" id="import-file" accept=".xlsx,.xls" onchange="app.onImportFile(this.files[0])">' +
+    '<input type="file" id="import-file" accept=".xlsx,.xls" '+(S.importBusy?"disabled ":"")+'onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
   '</div>';
@@ -3123,7 +3124,7 @@ function importarHTML(e){
       '</tr>';
     }).join("");
     body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
-      '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos?"":"disabled")+'>Importar seleccionados</button></div>' +
+      '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos&&!S.importBusy?"":"disabled")+'>'+(S.importBusy?"Importando… no cierres ni pulses de nuevo":"Importar seleccionados")+'</button></div>' +
       '<div class="card table-wrap"><table class="data"><thead><tr><th></th>'+importThHTML('Fecha','fecha')+importThHTML('Tipo','tipo')+importThHTML('N° documento','doc')+importThHTML('Tercero','tercero')+importThHTML('Total','total','num')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
       '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución de mercancía (según lo que traiga el archivo). La DIAN no indica si una nota crédito es descuento condicionado, devolución sin factura, o afecta la retención de una factura — revísalas una por una y marca la que corresponda con los enlaces junto al tercero.</p>';
   }
