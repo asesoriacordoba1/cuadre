@@ -1376,6 +1376,11 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     esND: esND,
     esPersonal: esPersonal,
     esConocidoPersonal: esConocidoPersonal,
+    // Documento soporte que otro emitió a nombre de la empresa: la empresa es la
+    // vendedora y esa mercancía ya se facturó (p. ej. a Consumidor Final), así que
+    // contabilizarlo la duplicaría. Solo se contabiliza si el tercero es arrendatario
+    // o comprador de semovientes (ingreso que no se había facturado).
+    dsRecibido: esDocSoporte && !empresaEsEmisor && esCompra,
     porReglas: porReglas,
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
@@ -1700,7 +1705,7 @@ function handleImportFile(file){
         if(d._error==="fecha"){ skippedFecha++; if(sampleFecha==null) sampleFecha=d.raw; return; }
         d.dup = !!(d.cufe && (existingCufes[d.cufe] || seenInFile[d.cufe]));
         if(d.cufe) seenInFile[d.cufe]=true;
-        d.include = !d.dup && !d.esConocidoPersonal;
+        d.include = !d.dup && !d.esConocidoPersonal && !d.dsRecibido;
         drafts.push(d);
       });
       S.importRows = drafts;
@@ -3059,6 +3064,7 @@ function importarHTML(e){
       var flags = "";
       if(r.dup) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Ya importado</span>';
       else if(!r.debeCuadra) flags = '<span class="chip chip-bad">No cuadra</span>';
+      else if(r.dsRecibido) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Doc. soporte recibido — ya facturado, no se contabiliza</span>';
       else if(r.esConocidoPersonal) flags = '<span class="chip chip-bad"><span class="chip-dot"></span>Personal (excluido)</span>';
       else if(r.esPersonal) flags = '<span class="chip chip-warn"><span class="chip-dot"></span>Diverso</span>';
       else if(r.porReglas) flags = '<span class="chip chip-good"><span class="chip-dot"></span>Por reglas</span>';
