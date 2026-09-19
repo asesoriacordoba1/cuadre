@@ -567,7 +567,8 @@ function agruparPorMayor(items, campos){
 /* ---------- create empresa ---------- */
 async function guardarEdicionEmpresa(id, d){
   var cambios = {nombre:d.nombre, nit:d.nit, sector:d.sector, grupo_niif:d.grupo_niif, responsabilidades:d.responsabilidades,
-    direccion:d.direccion, ciudad:d.ciudad, departamento:d.departamento, correo:d.correo, telefono:d.telefono};
+    direccion:d.direccion, ciudad:d.ciudad, departamento:d.departamento, correo:d.correo, telefono:d.telefono,
+    ciiu:d.ciiu, representante_nombre:d.representante_nombre, representante_tipo_doc:d.representante_tipo_doc, representante_identificacion:d.representante_identificacion};
   var res = await sb.from("empresas").update(cambios).eq("id", id);
   if(res.error){ alert("No se pudo guardar: "+res.error.message); return; }
   var e = S.empresas.find(function(x){ return x.id===id; });
@@ -578,7 +579,8 @@ async function guardarEdicionEmpresa(id, d){
 async function crearEmpresa(nombre, nit, sector, grupo, extra){
   extra = extra || {};
   var ins = await sb.from("empresas").insert({nombre:nombre, nit:nit, sector:sector, grupo_niif:grupo, creada:todayISO(), demo:false,
-    responsabilidades:extra.responsabilidades||[], direccion:extra.direccion||"", ciudad:extra.ciudad||"", departamento:extra.departamento||"", correo:extra.correo||"", telefono:extra.telefono||""}).select().single();
+    responsabilidades:extra.responsabilidades||[], direccion:extra.direccion||"", ciudad:extra.ciudad||"", departamento:extra.departamento||"", correo:extra.correo||"", telefono:extra.telefono||"",
+    ciiu:extra.ciiu||"", representante_nombre:extra.representante_nombre||"", representante_tipo_doc:extra.representante_tipo_doc||"13", representante_identificacion:extra.representante_identificacion||""}).select().single();
   if(ins.error){ alert("No se pudo crear la empresa: "+ins.error.message); return; }
   var id = ins.data.id;
   var rows = PUC.map(function(row){ return {empresa_id:id, codigo:row[0], nombre:row[1], tipo:row[2], nivel:row[3], naturaleza:naturaleza(row[2],!!row[4]), postable:esPostable(row[0])}; });
@@ -3183,6 +3185,14 @@ function empresaModal(e){
         return '<label style="display:flex;gap:8px;align-items:center;font-weight:400;margin:4px 0"><input type="checkbox" id="f-resp-'+r[0]+'" '+(resp.indexOf(r[0])>=0?"checked":"")+'> '+esc(r[1])+' <span class="small">'+esc(r[2])+'</span></label>';
       }).join("") +
       '<div class="small" style="margin-top:4px">Con esto Cuadre sabe si la empresa declara IVA (300) y retención (350), y avisa en los formularios si no aplican.</div></div>' +
+    '<div class="field"><label>Actividad económica principal (CIIU)</label><input id="f-ciiu" value="'+v(e.ciiu)+'" placeholder="Ej. 4711 — Comercio al por menor en establecimientos no especializados"></div>' +
+    '<div class="field"><label>Representante legal</label><input id="f-rep-nombre" value="'+v(e.representante_nombre)+'" placeholder="Nombre completo"></div>' +
+    '<div class="field-row">' +
+      '<div class="field"><label>Tipo de documento</label><select id="f-rep-tipodoc">' +
+        DIAN_DOC_TYPES.map(function(t){ return '<option value="'+esc(t[0])+'"'+((e.representante_tipo_doc||"13")===t[0]?" selected":"")+'>'+esc(t[0]+" - "+t[1])+'</option>'; }).join("") +
+      '</select></div>' +
+      '<div class="field"><label>Número de identificación</label><input id="f-rep-id" value="'+v(e.representante_identificacion)+'" placeholder="Cédula del representante"></div>' +
+    '</div>' +
     '<div class="field"><label>Dirección</label><input id="f-direccion" value="'+v(e.direccion)+'" placeholder="Cra 5 # 10-20"></div>' +
     '<div class="field-row">' +
       '<div class="field"><label>Ciudad</label><input id="f-ciudad" value="'+v(e.ciudad)+'" placeholder="Montería"></div>' +
@@ -3202,7 +3212,8 @@ function datosEmpresaDelFormulario(){
   return {
     nombre:g("f-nombre"), nit:g("f-nit"), sector:g("f-sector"), grupo_niif:pendingNiif,
     responsabilidades: RESPONSABILIDADES_EMPRESA.filter(function(r){ var c=document.getElementById("f-resp-"+r[0]); return c && c.checked; }).map(function(r){return r[0];}),
-    direccion:g("f-direccion"), ciudad:g("f-ciudad"), departamento:g("f-departamento"), correo:g("f-correo"), telefono:g("f-telefono")
+    direccion:g("f-direccion"), ciudad:g("f-ciudad"), departamento:g("f-departamento"), correo:g("f-correo"), telefono:g("f-telefono"),
+    ciiu:g("f-ciiu"), representante_nombre:g("f-rep-nombre"), representante_tipo_doc:g("f-rep-tipodoc"), representante_identificacion:g("f-rep-id")
   };
 }
 // Avisos según lo declarado en el RUT (solo si la empresa ya tiene responsabilidades registradas).
