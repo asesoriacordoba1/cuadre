@@ -1176,6 +1176,16 @@ function slotDeCuenta(codigo){
   if(c1==="4"||c1==="5"||c1==="6") return /590$/.test(codigo) ? "mainExenta" : "mainGravada";
   return "otro";
 }
+// Base mínima de retención en la fuente para compras generales según la fecha.
+// Decreto 572 de 2025: 10 UVT. El Consejo de Estado suspendió sus artículos 2 a 8 el
+// 7-may-2026; del 8-may al 30-jun-2026 rigieron las bases del Decreto 1625 de 2016
+// (compras: 27 UVT, DIAN Comunicado 070). Tras revocar la suspensión (auto del
+// 2-jun-2026) el 572 vuelve desde el 1-jul-2026.
+var SUSPENSION_572_DESDE = "2026-05-08", SUSPENSION_572_HASTA = "2026-06-30";
+function baseMinimaCompras(fecha, config){
+  if(fecha >= SUSPENSION_572_DESDE && fecha <= SUSPENSION_572_HASTA) return Math.round(27 * ((config && config.uvt) || 52374));
+  return (config && config.base_minima) || 524000;
+}
 function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
@@ -1221,7 +1231,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     else if(tMatch.concepto_retencion==="compras" || tMatch.concepto_retencion==="arrendamientos"){
       var base = total - iva;
       var tasa = tMatch.concepto_retencion==="compras" ? config.tasa_compras : config.tasa_arrendamientos;
-      reteRenta = base >= config.base_minima ? Math.round(base * tasa / 100) : 0;
+      var baseMin = tMatch.concepto_retencion==="compras" ? baseMinimaCompras(fecha, config) : config.base_minima;
+      reteRenta = base >= baseMin ? Math.round(base * tasa / 100) : 0;
       retNota = " ("+tMatch.concepto_retencion+" "+tasa+"%)";
     }
     else if(CONCEPTOS_SIN_RETENCION.indexOf(tMatch.concepto_retencion)>=0){ reteRenta = 0; }
@@ -2260,6 +2271,7 @@ function ajustesRetencionHTML(){
     '<div class="field" style="max-width:260px"><label>Base mínima sujeta a retención ($)</label><input type="number" id="cfg-bm" value="'+c.base_minima+'"></div>' +
     '<button class="btn btn-sm" onclick="app.guardarAjustes()">Guardar parámetros</button>' +
     '<p class="small" style="margin-top:8px">Se usan al importar de la DIAN para calcular la retención de compras y arrendamientos, salvo que el tercero sea autorretenedor.</p>' +
+    '<p class="small" style="margin-top:6px"><b>Decreto 572 de 2025:</b> la base mínima de compras es 10 UVT (el valor de arriba). Por la suspensión del Consejo de Estado, para compras con fecha del <b>8 de mayo al 30 de junio de 2026</b> Cuadre aplica automáticamente la base anterior del Decreto 1625 de 2016 (<b>27 UVT</b>, hoy '+fmtCOP(Math.round(27*(c.uvt||52374)))+'). Desde el 1 de julio de 2026 vuelve a regir el 572.</p>' +
   '</div>';
 }
 function terceroFiltrados(){
