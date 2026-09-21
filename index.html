@@ -3544,10 +3544,10 @@ async function dianProbar(){
   var el = document.getElementById("dian-enlace");
   var url = (el && el.value || "").trim();
   if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
+  var d1 = (document.getElementById("dian-desde")||{}).value || "", d2 = (document.getElementById("dian-hasta")||{}).value || "";   // se leen ANTES de redibujar la pantalla
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para probar la conexión."); return; }
   S.dianBusy = true; S.dianResultado = ""; render();
   try{
-    var d1 = (document.getElementById("dian-desde")||{}).value || "", d2 = (document.getElementById("dian-hasta")||{}).value || "";
     var cuerpo = {url:url};
     if(d1 && d2) cuerpo.exportar = {desde:d1, hasta:d2, grupo:"0"};
     var r = await sb.real.functions.invoke("dian-conectar", {body:cuerpo});
