@@ -3534,7 +3534,9 @@ function dianConectarCardHTML(){
     '<div class="section-title">Conexión con la DIAN — prueba</div>' +
     '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>). Cuadre lo usará una sola vez para comprobar si el portal deja entrar a un servicio automático y mostrarte qué encuentra. <b>Todavía no importa nada.</b> El enlace no se guarda.</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+(S.dianBusy?"disabled":"")+'>' +
-    '<button class="btn btn-sm" onclick="app.dianProbar()" '+(S.dianBusy?"disabled":"")+'>'+(S.dianBusy?"Conectando…":"Probar conexión")+'</button></div>' +
+    '<button class="btn btn-sm" onclick="app.dianProbar()" '+(S.dianBusy?"disabled":"")+'>'+(S.dianBusy?"Conectando… (puede tardar hasta 1 minuto)":"Probar conexión")+'</button></div>' +
+    '<div class="small" style="margin-top:10px">Opcional: pedir de verdad un listado <b>corto</b> a la DIAN para ver cómo responde (deja las fechas vacías para solo probar la conexión):</div>' +
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px"><label class="small">Desde <input type="date" id="dian-desde" '+(S.dianBusy?"disabled":"")+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+(S.dianBusy?"disabled":"")+'></label></div>' +
     (S.dianResultado ? '<div class="small" style="margin-top:10px">Resultado (cópialo completo y envíaselo a Claude):</div><textarea readonly style="width:100%;height:220px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianResultado)+'</textarea>' : '') +
   '</div>';
 }
@@ -3545,7 +3547,10 @@ async function dianProbar(){
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para probar la conexión."); return; }
   S.dianBusy = true; S.dianResultado = ""; render();
   try{
-    var r = await sb.real.functions.invoke("dian-conectar", {body:{url:url}});
+    var d1 = (document.getElementById("dian-desde")||{}).value || "", d2 = (document.getElementById("dian-hasta")||{}).value || "";
+    var cuerpo = {url:url};
+    if(d1 && d2) cuerpo.exportar = {desde:d1, hasta:d2, grupo:"0"};
+    var r = await sb.real.functions.invoke("dian-conectar", {body:cuerpo});
     if(r.error){
       var detalle = "";
       try{ if(r.error.context && r.error.context.json){ var j = await r.error.context.json(); detalle = JSON.stringify(j, null, 2); } }catch(e2){}
