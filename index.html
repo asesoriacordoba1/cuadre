@@ -2237,9 +2237,12 @@ function nombreEsDeEmpresa(nombre){
 function datosTerceroDesdeDian(nombre, nit){
   var n = normNit(nit);
   var esEmpresa = nombreEsDeEmpresa(nombre) || (n.length===9 && (n.charAt(0)==="8" || n.charAt(0)==="9"));
-  if(esEmpresa) return {es_juridica:true, tipo_documento:"31", razon_social:nombre};
+  // Todos los campos de nombre van siempre (vacíos si no aplican): al insertar varios terceros a la vez,
+  // si a unos les falta una columna la base la recibe como nula y la rechaza.
+  var base = {primer_apellido:"", segundo_apellido:"", primer_nombre:"", otros_nombres:""};
+  if(esEmpresa) return Object.assign(base, {es_juridica:true, tipo_documento:"31", razon_social:nombre});
   var p = String(nombre||"").trim().split(/\s+/).filter(Boolean);
-  var d = {es_juridica:false, tipo_documento:"13", razon_social:""};
+  var d = Object.assign(base, {es_juridica:false, tipo_documento:"13", razon_social:""});
   if(p.length>=4){ d.primer_apellido=p[0]; d.segundo_apellido=p[1]; d.primer_nombre=p[2]; d.otros_nombres=p.slice(3).join(" "); }
   else if(p.length===3){ d.primer_apellido=p[0]; d.segundo_apellido=p[1]; d.primer_nombre=p[2]; }
   else if(p.length===2){ d.primer_apellido=p[0]; d.primer_nombre=p[1]; }
