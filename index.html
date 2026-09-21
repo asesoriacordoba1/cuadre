@@ -3545,11 +3545,7 @@ async function dianProbar(){
   var url = (el && el.value || "").trim();
   if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
   var d1 = (document.getElementById("dian-desde")||{}).value || "", d2 = (document.getElementById("dian-hasta")||{}).value || "";   // se leen ANTES de redibujar la pantalla
-  if(!d1 || !d2){ if(!confirm("No hay fechas escritas en Desde y Hasta.
-
-Si continúas solo se probará la conexión (se gasta el enlace) y NO se pedirá ningún listado.
-
-¿Continuar sin fechas?")) return; }
+  if(!d1 || !d2){ if(!confirm("No hay fechas escritas en Desde y Hasta. Si continuas solo se probara la conexion (se gasta el enlace) y NO se pedira ningun listado. Continuar sin fechas?")) return; }
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para probar la conexión."); return; }
   S.dianBusy = true; S.dianResultado = ""; render();
   try{
