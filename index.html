@@ -3535,12 +3535,12 @@ function dianConectarCardHTML(){
     '<div class="section-title">Traer el listado directo desde la DIAN</div>' +
     '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>), elige el mes y Cuadre pide el listado a la DIAN, lo descarga y lo abre en la vista previa de abajo, igual que si hubieras subido el Excel. <b>Todavía no guarda nada</b>: tú revisas y confirmas. El enlace de la DIAN vale 60 minutos: puedes usar el mismo para traer varios meses seguidos. Cuadre no lo guarda.</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+ocupado+'>' +
-    '<label class="small">Mes <input type="month" id="dian-mes" '+ocupado+'></label>' +
+    '<label class="small">Desde <input type="date" id="dian-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+ocupado+'></label>' +
     '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
     (S.dianMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianMsg)+'</div>' : '') +
     '<details style="margin-top:14px"><summary class="small" style="cursor:pointer">Prueba técnica (avanzado)</summary>' +
       '<p class="small" style="margin:8px 0">Comprueba la conexión y, si escribes fechas, pide un listado corto para ver la respuesta de la DIAN. Usa el mismo enlace del campo de arriba.</p>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="small">Desde <input type="date" id="dian-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+ocupado+'></label>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="small">Desde <input type="date" id="dian-t-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-t-hasta" '+ocupado+'></label>' +
       '<button class="btn btn-outline btn-sm" onclick="app.dianProbar()" '+ocupado+'>Probar conexión</button></div>' +
       (S.dianResultado ? '<div class="small" style="margin-top:10px">Resultado:</div><textarea readonly style="width:100%;height:220px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianResultado)+'</textarea>' : '') +
     '</details>' +
@@ -3553,13 +3553,14 @@ async function mensajeDeErrorFuncion(err){
 }
 async function dianTraerListado(){
   var url = ((document.getElementById("dian-enlace")||{}).value || "").trim();
-  var mes = ((document.getElementById("dian-mes")||{}).value || "").trim();   // AAAA-MM
+  var desde = ((document.getElementById("dian-desde")||{}).value || "").trim(), hasta = ((document.getElementById("dian-hasta")||{}).value || "").trim();   // AAAA-MM-DD
   if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
-  if(!/^\d{4}-\d{2}$/.test(mes)){ alert("Elige el mes del listado."); return; }
+  if(!desde || !hasta){ alert("Elige las fechas Desde y Hasta del listado."); return; }
+  if(desde > hasta){ alert("La fecha Desde no puede ser posterior a la fecha Hasta."); return; }
+  if((Date.parse(hasta) - Date.parse(desde)) / 86400000 > 92){ alert("El rango es muy largo. Pide como máximo 3 meses por vez."); return; }
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para traer el listado."); return; }
-  var ult = new Date(parseInt(mes.slice(0,4),10), parseInt(mes.slice(5,7),10), 0).getDate();
-  var desde = mes+"-01", hasta = mes+"-"+String(ult).padStart(2,"0");
-  S.dianBusy = true; S.dianMsg = "Pidiendo el listado de "+periodoLabel(mes)+" a la DIAN. Puede tardar hasta 2 minutos, no cierres esta ventana…"; render();
+  var rangoTxt = fechaDMY(desde)+" a "+fechaDMY(hasta);
+  S.dianBusy = true; S.dianMsg = "Pidiendo el listado del "+rangoTxt+" a la DIAN. Puede tardar hasta 2 minutos, no cierres esta ventana…"; render();
   try{
     var r = await sb.real.functions.invoke("dian-listado", {body:{url:url, desde:desde, hasta:hasta, grupo:"0"}});
     if(r.error){ S.dianMsg = "No se pudo traer el listado: "+(await mensajeDeErrorFuncion(r.error)); S.dianBusy = false; render(); return; }
@@ -3573,7 +3574,7 @@ async function dianTraerListado(){
     var xblob = await zip.files[nombre].async("blob");
     var archivo = new File([xblob], nombre.split("/").pop(), {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     S.dianBusy = false;
-    S.dianMsg = "Listo: "+archivo.name+" ("+periodoLabel(mes)+"). Revisa la vista previa de abajo antes de importar.";
+    S.dianMsg = "Listo: "+archivo.name+" (del "+rangoTxt+"). Revisa la vista previa de abajo antes de importar.";
     handleImportFile(archivo);
   }catch(err){ S.dianMsg = "No se pudo traer el listado: "+(err && err.message || err); S.dianBusy = false; render(); }
 }
@@ -3581,7 +3582,7 @@ async function dianProbar(){
   var el = document.getElementById("dian-enlace");
   var url = (el && el.value || "").trim();
   if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
-  var d1 = (document.getElementById("dian-desde")||{}).value || "", d2 = (document.getElementById("dian-hasta")||{}).value || "";   // se leen ANTES de redibujar la pantalla
+  var d1 = (document.getElementById("dian-t-desde")||{}).value || "", d2 = (document.getElementById("dian-t-hasta")||{}).value || "";   // se leen ANTES de redibujar la pantalla
   if(!d1 || !d2){ if(!confirm("No hay fechas escritas en Desde y Hasta. Si continuas solo se probara la conexion (se gasta el enlace) y NO se pedira ningun listado. Continuar sin fechas?")) return; }
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para probar la conexión."); return; }
   S.dianBusy = true; S.dianResultado = ""; render();
