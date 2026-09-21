@@ -3528,6 +3528,32 @@ function importThHTML(label, key, claseExtra){
   var arrow = S.importSortKey===key ? (S.importSortDir<0?" ▾":" ▴") : "";
   return '<th class="'+(claseExtra||"")+'" style="cursor:pointer;user-select:none" onclick="app.setImportSort(\''+key+'\')">'+esc(label)+arrow+'</th>';
 }
+/* ---------- conexión con el portal de la DIAN (prueba) ---------- */
+function dianConectarCardHTML(){
+  return '<div class="card card-pad" style="margin-top:16px">' +
+    '<div class="section-title">Conexión con la DIAN — prueba</div>' +
+    '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>). Cuadre lo usará una sola vez para comprobar si el portal deja entrar a un servicio automático y mostrarte qué encuentra. <b>Todavía no importa nada.</b> El enlace no se guarda.</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+(S.dianBusy?"disabled":"")+'>' +
+    '<button class="btn btn-sm" onclick="app.dianProbar()" '+(S.dianBusy?"disabled":"")+'>'+(S.dianBusy?"Conectando…":"Probar conexión")+'</button></div>' +
+    (S.dianResultado ? '<div class="small" style="margin-top:10px">Resultado (cópialo completo y envíaselo a Claude):</div><textarea readonly style="width:100%;height:220px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianResultado)+'</textarea>' : '') +
+  '</div>';
+}
+async function dianProbar(){
+  var el = document.getElementById("dian-enlace");
+  var url = (el && el.value || "").trim();
+  if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para probar la conexión."); return; }
+  S.dianBusy = true; S.dianResultado = ""; render();
+  try{
+    var r = await sb.real.functions.invoke("dian-conectar", {body:{url:url}});
+    if(r.error){
+      var detalle = "";
+      try{ if(r.error.context && r.error.context.json){ var j = await r.error.context.json(); detalle = JSON.stringify(j, null, 2); } }catch(e2){}
+      S.dianResultado = "ERROR: "+(r.error.message||"")+(detalle?"\n"+detalle:"");
+    } else S.dianResultado = JSON.stringify(r.data, null, 2);
+  }catch(err){ S.dianResultado = "ERROR: "+(err && err.message || err); }
+  S.dianBusy = false; render();
+}
 function importarHTML(e){
   var body = '<div class="card card-pad">' +
     '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
@@ -3537,6 +3563,7 @@ function importarHTML(e){
     (S.importErr? '<div class="login-err" style="margin-top:10px">'+esc(S.importErr)+'</div>' : "") +
   '</div>';
 
+  body += dianConectarCardHTML();
   if(S.importRows && S.importRows.length){
     var incluidos = S.importRows.filter(function(r){return r.include;}).length;
     var indicesOrden = S.importRows.map(function(r,i){return i;});
@@ -4090,6 +4117,7 @@ window.app = {
   guardarCopia: descargarParaSinConexion,
   respaldoCompleto: respaldoCompleto,
   respaldoExcel: respaldoExcel,
+  dianProbar: dianProbar,
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
