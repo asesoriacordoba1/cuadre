@@ -3530,15 +3530,52 @@ function importThHTML(label, key, claseExtra){
 }
 /* ---------- conexión con el portal de la DIAN (prueba) ---------- */
 function dianConectarCardHTML(){
+  var ocupado = S.dianBusy ? "disabled" : "";
   return '<div class="card card-pad" style="margin-top:16px">' +
-    '<div class="section-title">Conexión con la DIAN — prueba</div>' +
-    '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>). Cuadre lo usará una sola vez para comprobar si el portal deja entrar a un servicio automático y mostrarte qué encuentra. <b>Todavía no importa nada.</b> El enlace no se guarda.</p>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+(S.dianBusy?"disabled":"")+'>' +
-    '<button class="btn btn-sm" onclick="app.dianProbar()" '+(S.dianBusy?"disabled":"")+'>'+(S.dianBusy?"Conectando… (puede tardar hasta 1 minuto)":"Probar conexión")+'</button></div>' +
-    '<div class="small" style="margin-top:10px">Opcional: pedir de verdad un listado <b>corto</b> a la DIAN para ver cómo responde (deja las fechas vacías para solo probar la conexión):</div>' +
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px"><label class="small">Desde <input type="date" id="dian-desde" '+(S.dianBusy?"disabled":"")+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+(S.dianBusy?"disabled":"")+'></label></div>' +
-    (S.dianResultado ? '<div class="small" style="margin-top:10px">Resultado (cópialo completo y envíaselo a Claude):</div><textarea readonly style="width:100%;height:220px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianResultado)+'</textarea>' : '') +
+    '<div class="section-title">Traer el listado directo desde la DIAN</div>' +
+    '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>), elige el mes y Cuadre pide el listado a la DIAN, lo descarga y lo abre en la vista previa de abajo, igual que si hubieras subido el Excel. <b>Todavía no guarda nada</b>: tú revisas y confirmas. El enlace se usa una sola vez y no se guarda; pide uno nuevo por cada mes.</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+ocupado+'>' +
+    '<label class="small">Mes <input type="month" id="dian-mes" '+ocupado+'></label>' +
+    '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
+    (S.dianMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianMsg)+'</div>' : '') +
+    '<details style="margin-top:14px"><summary class="small" style="cursor:pointer">Prueba técnica (avanzado)</summary>' +
+      '<p class="small" style="margin:8px 0">Comprueba la conexión y, si escribes fechas, pide un listado corto para ver la respuesta de la DIAN. Usa el mismo enlace del campo de arriba.</p>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="small">Desde <input type="date" id="dian-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+ocupado+'></label>' +
+      '<button class="btn btn-outline btn-sm" onclick="app.dianProbar()" '+ocupado+'>Probar conexión</button></div>' +
+      (S.dianResultado ? '<div class="small" style="margin-top:10px">Resultado:</div><textarea readonly style="width:100%;height:220px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianResultado)+'</textarea>' : '') +
+    '</details>' +
   '</div>';
+}
+async function mensajeDeErrorFuncion(err){
+  var msg = (err && err.message) || "Error desconocido";
+  try{ if(err && err.context && err.context.json){ var j = await err.context.json(); if(j && j.error) msg = j.error; } }catch(e){}
+  return msg;
+}
+async function dianTraerListado(){
+  var url = ((document.getElementById("dian-enlace")||{}).value || "").trim();
+  var mes = ((document.getElementById("dian-mes")||{}).value || "").trim();   // AAAA-MM
+  if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
+  if(!/^\d{4}-\d{2}$/.test(mes)){ alert("Elige el mes del listado."); return; }
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para traer el listado."); return; }
+  var ult = new Date(parseInt(mes.slice(0,4),10), parseInt(mes.slice(5,7),10), 0).getDate();
+  var desde = mes+"-01", hasta = mes+"-"+String(ult).padStart(2,"0");
+  S.dianBusy = true; S.dianMsg = "Pidiendo el listado de "+periodoLabel(mes)+" a la DIAN. Puede tardar hasta 2 minutos, no cierres esta ventana…"; render();
+  try{
+    var r = await sb.real.functions.invoke("dian-listado", {body:{url:url, desde:desde, hasta:hasta, grupo:"0"}});
+    if(r.error){ S.dianMsg = "No se pudo traer el listado: "+(await mensajeDeErrorFuncion(r.error)); S.dianBusy = false; render(); return; }
+    var blob = r.data;
+    if(!(blob instanceof Blob)){ S.dianMsg = "La respuesta de la DIAN no fue un archivo válido."; S.dianBusy = false; render(); return; }
+    S.dianMsg = "Listado recibido ("+(blob.size/1048576).toFixed(1)+" MB). Abriéndolo…"; render();
+    var zip = await JSZip.loadAsync(blob);
+    var excels = Object.keys(zip.files).filter(function(n){ return /\.xlsx?$/i.test(n) && !zip.files[n].dir; });
+    if(!excels.length){ S.dianMsg = "El archivo de la DIAN no trae ningún Excel."; S.dianBusy = false; render(); return; }
+    var nombre = excels[0];
+    var xblob = await zip.files[nombre].async("blob");
+    var archivo = new File([xblob], nombre.split("/").pop(), {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    S.dianBusy = false;
+    S.dianMsg = "Listo: "+archivo.name+" ("+periodoLabel(mes)+"). Revisa la vista previa de abajo antes de importar.";
+    handleImportFile(archivo);
+  }catch(err){ S.dianMsg = "No se pudo traer el listado: "+(err && err.message || err); S.dianBusy = false; render(); }
 }
 async function dianProbar(){
   var el = document.getElementById("dian-enlace");
@@ -4124,6 +4161,7 @@ window.app = {
   respaldoCompleto: respaldoCompleto,
   respaldoExcel: respaldoExcel,
   dianProbar: dianProbar,
+  dianTraerListado: dianTraerListado,
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
