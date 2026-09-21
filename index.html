@@ -726,19 +726,15 @@ function libroCoworkDeEmpresa(e, datos){
     var h = hoja300Bimestre(per, emp.nombre);
     if(h){ var a = mesDePer(bim.periodos[0]), b = mesDePer(bim.periodos[1]); XLSX.utils.book_append_sheet(wb, h, ("IVA FORM 300 "+a.abr+"-"+b.abr+" "+b.anio).slice(0,31)); }
   });
-  // Datos completos (con identificadores) para poder restaurar todo desde este libro.
-  var cab = comps.map(function(c){ return {id:c.id, numero:c.numero, tipo:c.tipo, fecha:c.fecha, periodo:c.periodo, descripcion:c.descripcion, tercero_nit:c.tercero_nit||"", total_debito:Number(c.total_debito)||0, total_credito:Number(c.total_credito)||0, estado:c.estado||"", cufe:c.cufe||""}; });
-  XLSX.utils.book_append_sheet(wb, hojaDeObjetos(cab, columnasDe(cab), [38,20,8,12,10,60,14,16,16,14,40]), "BD_COMPROBANTES");
-  var det = [];
-  comps.forEach(function(c){ (c.lineas||[]).forEach(function(l, k){ det.push({numero:c.numero, linea:k+1, tipo:c.tipo, fecha:c.fecha, cuenta:l.cuenta, detalle:l.detalle||"", tercero:l.tercero||"", debito:Number(l.debito)||0, credito:Number(l.credito)||0}); }); });
-  XLSX.utils.book_append_sheet(wb, hojaDeObjetos(det, columnasDe(det), [20,7,8,12,12,60,12,16,16]), "BD_DETALLE");
+  // El detalle linea por linea no va en el Excel (pesa mucho): la copia completa para restaurar es el respaldo tecnico (.zip).
+  var nLineasTotal = comps.reduce(function(a, c){ return a + (c.lineas||[]).length; }, 0);
   XLSX.utils.book_append_sheet(wb, hojaDeObjetos(datos.terceros, columnasDe(datos.terceros)), "BD_TERCEROS");
   XLSX.utils.book_append_sheet(wb, hojaDeObjetos(datos.cuentas, columnasDe(datos.cuentas, ["empresa_id"])), "BD_CUENTAS");
   var datosEmp = [["Dato","Valor"]];
   Object.keys(e).forEach(function(k){ if(k.charAt(0)!=="_") datosEmp.push([k, Array.isArray(e[k]) ? e[k].join(", ") : (e[k]==null ? "" : e[k])]); });
   var wsE = XLSX.utils.aoa_to_sheet(datosEmp); wsE["!cols"] = [{wch:28},{wch:60}];
   XLSX.utils.book_append_sheet(wb, wsE, "EMPRESA");
-  return {wb:wb, anio:anioTxt, nComps:comps.length, nLineas:det.length, nTerc:S.terceros.length};
+  return {wb:wb, anio:anioTxt, nComps:comps.length, nLineas:nLineasTotal, nTerc:S.terceros.length};
 }
 async function respaldoExcel(){
   if(S.respaldoBusy) return;
