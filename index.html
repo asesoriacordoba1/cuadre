@@ -2519,6 +2519,7 @@ function utilidadAcumulada(hastaPeriodo){
 var modalHTML="";
 function closeModal(){
   if(returnToComprobante){ returnToComprobante=false; openModal(nuevoComprobanteModal()); return; }
+  prefillTercero = null;
   modalHTML=""; render();
 }
 function openModal(html){ modalHTML=html; render(); }
@@ -2912,7 +2913,7 @@ function comprobantesHTML(e){
       var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
       var valorCols = cuenta ? (function(){ var m=montoCuenta(c); return '<td class="num">'+(m.d?fmtCOP(m.d):"")+'</td><td class="num">'+(m.c?fmtCOP(m.c):"")+'</td>'; })() : '<td class="num">'+fmtCOP(c.total_debito)+'</td>';
       return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+periodoLabel(c.periodo)+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td>' + valorCols +
-        '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link link-del" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
+        '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" onclick="app.editarTerceroDeComp(\''+c._id+'\')">Tercero</a> · <a class="link link-del" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
     }).join("") || '<tr><td colspan="8" class="small" style="padding:16px 10px">Sin resultados'+(cuenta?" para la cuenta "+esc(S.compCuenta):(grupo?" para "+esc(grupo.label):' para "'+esc(S.compBuscar)+'"'))+'.</td></tr>';
     var totTerc = found.reduce(function(a,c){return a+(Number(c.total_debito)||0);},0);
     var totCuentaD=0, totCuentaC=0;
@@ -2943,7 +2944,7 @@ function comprobantesHTML(e){
   var rows = list.map(function(c){
     var tipoLbl = (COMPROB_TIPOS.find(function(t){return t.k===c.tipo;})||{}).label||c.tipo;
     return '<tr><td class="mono acct-code">'+c._id+'</td><td>'+fmtDate(c.fecha)+'</td><td>'+tipoLbl+'</td><td>'+esc(c.descripcion)+'</td><td class="num">'+fmtCOP(c.total_debito)+'</td>' +
-      '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link link-del" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
+      '<td><a class="link" onclick="app.verComprobante(\''+c._id+'\')">Ver</a> · <a class="link" onclick="app.editarTerceroDeComp(\''+c._id+'\')">Tercero</a> · <a class="link link-del" onclick="app.eliminarComprobante(\''+c._id+'\')">Eliminar</a></td></tr>';
   }).join("") || '<tr><td colspan="6" class="small" style="padding:16px 10px">No hay comprobantes'+(S.compFiltro?" de esta categoría":"")+' en '+periodoLabel(per)+'.</td></tr>';
   var tiposPresentes = {};
   listPeriodo.forEach(function(c){ tiposPresentes[c.tipo]=(tiposPresentes[c.tipo]||0)+1; });
@@ -3895,9 +3896,11 @@ var DIAN_DOC_TYPES = [
 var pendingEsJuridica = true;
 var editingTerceroId = null;
 var returnToComprobante = false;
+var prefillTercero = null;      // datos para crear un tercero desde un comprobante cuyo tercero aún no está registrado
+var draftTerceroNit = "";       // NIT guardado en el comprobante que se está viendo
 function selOpt(value, current){ return value===current ? " selected" : ""; }
 function nuevoTerceroModal(){
-  var t = editingTerceroId ? (S.terceros.find(function(x){return x.id===editingTerceroId;})||{}) : {};
+  var t = editingTerceroId ? (S.terceros.find(function(x){return x.id===editingTerceroId;})||{}) : (prefillTercero || {});
   var docOpts = DIAN_DOC_TYPES.map(function(d){return '<option value="'+d[0]+'"'+selOpt(d[0],t.tipo_documento||"31")+'>'+d[0]+' - '+d[1]+'</option>';}).join("");
   var nombreFields = pendingEsJuridica ?
     '<div class="field"><label>Razón social</label><input id="t-razon" value="'+esc(t.razon_social||"")+'" placeholder="Nombre de la empresa"></div>' :
@@ -3952,9 +3955,11 @@ function nuevoComprobanteModal(){
   var diffExacto = Math.abs(diff)<0.5 && tot.d>0;
   var diffAjustable = !diffExacto && Math.abs(diff)<=TOLERANCIA_AJUSTE_PESO && tot.d>0;
   var diffClase = diffExacto?"diff-ok":(diffAjustable?"diff-adjust":"diff-off");
-  var terceroDetectado = draftDescripcion ? terceroPorNombre(extractTercFromDescripcion(draftDescripcion)) : null;
+  var terceroDetectado = draftDescripcion ? terceroDeComprobante({tercero_nit: draftId ? draftTerceroNit : "", descripcion: draftDescripcion}) : null;
   var terceroDetectadoHTML = terceroDetectado ?
-    ('<p class="small" style="margin:-4px 0 10px">Tercero: <b>'+esc(terceroDetectado.nombre)+'</b> · <a class="link" onclick="app.editarTerceroPorId(\''+terceroDetectado.id+'\')">Editar tercero</a></p>') : "";
+    ('<p class="small" style="margin:-4px 0 10px">Tercero: <b>'+esc(terceroDetectado.nombre)+'</b> · <span class="chip">'+cap(terceroDetectado.tipo||"otro")+'</span> · <a class="link" onclick="app.editarTerceroPorId(\''+terceroDetectado.id+'\')">Editar tercero</a></p>')
+    : ((draftDescripcion && draftId && extractTercFromDescripcion(draftDescripcion)) ?
+      ('<p class="small" style="margin:-4px 0 10px">Tercero: <b>'+esc(extractTercFromDescripcion(draftDescripcion))+'</b> · <span class="chip chip-warn">Sin registrar</span> · <a class="link" onclick="app.editarTerceroDeComp(\''+esc(draftId)+'\',true)">Crear tercero</a></p>') : "");
   var lineRows = draftLineas.map(function(l,i){
     var opts = cuentaOpts;
     if(l.cuenta && String(l.cuenta).length!==6){
@@ -4030,6 +4035,23 @@ window.app = {
     var t = S.terceros.find(function(x){return x.id===id;});
     if(!t) return;
     editingTerceroId = id; pendingEsJuridica = !!t.es_juridica;
+    openModal(nuevoTerceroModal());
+  },
+  // Abre el formulario del tercero de un comprobante sin salir de la lista (o de la vista del comprobante).
+  // Si el tercero aún no está registrado, lo abre para crearlo con el nombre y el NIT del comprobante.
+  editarTerceroDeComp: function(numero, volverAlComprobante){
+    var c = S.comprobantes.find(function(x){ return x._id===numero; });
+    if(!c) return;
+    var t = terceroDeComprobante(c);
+    returnToComprobante = !!volverAlComprobante;
+    if(t){
+      editingTerceroId = t.id; pendingEsJuridica = !!t.es_juridica; prefillTercero = null;
+    } else {
+      var nom = extractTercFromDescripcion(c.descripcion), nit = c.tercero_nit || "";
+      var d = datosTerceroDesdeDian(nom, nit);
+      editingTerceroId = null; pendingEsJuridica = !!d.es_juridica;
+      prefillTercero = {identificacion:nit, razon_social:d.razon_social, primer_apellido:d.primer_apellido, segundo_apellido:d.segundo_apellido, primer_nombre:d.primer_nombre, otros_nombres:d.otros_nombres, tipo_documento:d.tipo_documento, tipo:"proveedor"};
+    }
     openModal(nuevoTerceroModal());
   },
   editarTerceroPorId: function(id){
@@ -4108,7 +4130,7 @@ window.app = {
   verComprobante: function(numero){
     var c=S.comprobantes.find(function(x){return x._id===numero;});
     if(!c) return;
-    draftId=c._id; draftTipo=c.tipo; draftFecha=c.fecha; draftDescripcion=c.descripcion; draftPeriodo=c.periodo;
+    draftId=c._id; draftTipo=c.tipo; draftFecha=c.fecha; draftDescripcion=c.descripcion; draftPeriodo=c.periodo; draftTerceroNit=c.tercero_nit||"";
     draftLineas=(c.lineas||[]).map(function(l){return {cuenta:l.cuenta,tercero:l.tercero||"",detalle:l.detalle||"",debito:l.debito||0,credito:l.credito||0};});
     openModal(nuevoComprobanteModal());
   },
