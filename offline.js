@@ -29,7 +29,7 @@ function uuid(){
 function clonar(o){ return Object.assign({}, o); }
 function esErrorDeRed(err){
   var m = String((err && (err.message || err.details)) || err || "");
-  return /Failed to fetch|NetworkError|Network request failed|Load failed|fetch failed|ERR_INTERNET|ERR_NETWORK|timeout/i.test(m);
+  return /Failed to fetch|NetworkError|Network request failed|Load failed|fetch failed|ERR_INTERNET|ERR_NETWORK|net::ERR/i.test(m);
 }
 
 /* ---------- IndexedDB ---------- */
@@ -95,6 +95,13 @@ function guardarTabla(tabla, scope, rows, forzar){
   if(!forzar && ultimoGuardado[k] && ahora - ultimoGuardado[k] < 60000) return Promise.resolve();
   ultimoGuardado[k] = ahora;
   return idbPut("t", {rows: mem[k], ts: ahora}, k).catch(function(e){ console.warn("Cuadre: no se pudo guardar la copia local de "+k, e); });
+}
+var timersPersistir = {};
+function programarPersistencia(tabla, scope){
+  // La cola de cambios ya es el respaldo duradero; la copia completa se guarda unos segundos despues.
+  var k = clave(tabla, scopeDeTabla(tabla, scope));
+  if(timersPersistir[k]) clearTimeout(timersPersistir[k]);
+  timersPersistir[k] = setTimeout(function(){ delete timersPersistir[k]; persistir(tabla, scope); }, 3000);
 }
 function persistir(tabla, scope){
   var k = clave(tabla, scopeDeTabla(tabla, scope));
@@ -269,7 +276,7 @@ function escrituraLocal(rec){
           if(todosNuevos){ calls[opIdx] = ["insert", [payload]]; }
         }
         afectadasTotal = afectadasTotal.concat(aplicarOp(rows, tabla, op, payload, opts, filtros, sc));
-        return persistir(tabla, sc);
+        programarPersistencia(tabla, sc);
       });
     });
   }, Promise.resolve());

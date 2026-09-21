@@ -1,0 +1,15 @@
+{
+  "name": "Cuadre",
+  "short_name": "Cuadre",
+  "description": "Contabilidad para Colombia, con trabajo sin conexión",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F6F4EE",
+  "theme_color": "#1F5C45",
+  "lang": "es",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}

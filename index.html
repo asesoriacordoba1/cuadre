@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cuadre</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1F5C45">
+<link rel="icon" type="image/png" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -194,13 +197,16 @@ a.link:hover{text-decoration:underline}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="offline.js"></script>
 <script>
 (function(){
 "use strict";
 
 var SUPABASE_URL = "https://pwneuqkqsjeziyzflytx.supabase.co";
 var SUPABASE_ANON_KEY = "sb_publishable_tcciM3eglJrLVP2djnnU-g_HUsaBKPZ";
-var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Cliente envuelto por offline.js: con internet se comporta igual que el original; sin internet
+// lee de la copia local y deja las escrituras en cola para subirlas después.
+var sb = CuadreOffline.wrap(window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY), {url:SUPABASE_URL, key:SUPABASE_ANON_KEY});
 
 /* ---------- PUC template (Decreto 2650) ---------- */
 var PUC = [
@@ -367,16 +373,79 @@ function debounce(fn, ms){
 }
 
 /* ---------- boot / auth ---------- */
+var renderTimer = null;
+function renderPronto(){ if(renderTimer) clearTimeout(renderTimer); renderTimer = setTimeout(render, 400); }
+function cerrarSesionLocal(){ teardownEmpresa(); S.empresas=[]; S.empresaId=null; clearMainChannels(); S.session=null; render(); }
+var recargas = {};
+function recargarLocal(tabla, scopes){
+  var id = S.empresaId, f = null;
+  if(tabla==="empresas") f = loadEmpresas;
+  else if(tabla==="config") f = loadConfig;
+  else if(tabla==="reglas_cuentas") f = loadReglasCuentas;
+  else if(id && scopes.indexOf(id)>=0){
+    f = ({comprobantes:loadComprobantes, terceros:loadTerceros, cuentas:loadCuentas, periodos:loadPeriodos})[tabla];
+    if(f){ var g = f; f = function(){ return g(id); }; }
+  }
+  if(!f) return;
+  if(recargas[tabla]) clearTimeout(recargas[tabla]);
+  recargas[tabla] = setTimeout(function(){ Promise.resolve(f()).then(render); }, 400);
+}
+function recargarTodo(){
+  loadEmpresas();
+  loadConfig().then(render);
+  loadReglasCuentas().then(render);
+  var id = S.empresaId;
+  if(id) Promise.all([loadCuentas(id), loadTerceros(id), loadComprobantes(id), loadPeriodos(id)]).then(render);
+}
+async function descargarParaSinConexion(){
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para guardar la copia."); return; }
+  if(S.copiaBusy) return;
+  S.copiaBusy = true; S.copiaMsg = ""; render();
+  try{
+    for(var i=0;i<S.empresas.length;i++){
+      var e = S.empresas[i];
+      S.copiaMsg = "Guardando "+e.nombre+" ("+(i+1)+" de "+S.empresas.length+")…"; render();
+      await Promise.all([loadAllRows("cuentas", e.id), loadAllRows("terceros", e.id), loadAllRows("comprobantes", e.id), loadAllRows("periodos", e.id)]);
+    }
+    await loadReglasCuentas(); await loadConfig();
+    S.copiaMsg = "Listo: copia guardada de "+S.empresas.length+" empresa(s).";
+  }catch(err){ S.copiaMsg = "No se pudo guardar la copia: "+err.message; }
+  S.copiaBusy = false; render();
+}
+function estadoConexionHTML(){
+  var st = CuadreOffline.estado();
+  var txt, cls;
+  if(!st.online){ txt = "Sin conexión · trabajando con la copia de este computador"; cls = "chip-warn"; }
+  else if(st.sincronizando){ txt = "Subiendo cambios…"; cls = "chip-warn"; }
+  else { txt = "En línea"; cls = "chip-good"; }
+  var html = '<div style="margin-bottom:8px"><span class="chip '+cls+'"><span class="chip-dot"></span>'+esc(txt)+'</span>';
+  if(st.pendientes) html += '<div class="small" style="margin-top:4px"><b>'+st.pendientes+'</b> cambio(s) por subir'+(st.online&&!st.sincronizando?' · <a onclick="app.sincronizarAhora()">Subir ahora</a>':'')+'</div>';
+  if(st.error) html += '<div class="small" style="margin-top:4px;color:var(--danger,#c0392b)">'+esc(st.error)+'</div>';
+  if(st.online) html += '<div class="small" style="margin-top:4px"><a onclick="app.guardarCopia()">'+(S.copiaBusy?"Guardando copia…":"Guardar copia para trabajar sin conexión")+'</a></div>';
+  if(S.copiaMsg) html += '<div class="small" style="margin-top:4px">'+esc(S.copiaMsg)+'</div>';
+  return html + '</div>';
+}
 function boot(){
   render();
+  CuadreOffline.alCambiar(renderPronto);
+  CuadreOffline.alCambioLocal(recargarLocal);
+  CuadreOffline.alSincronizar(recargarTodo);
+  CuadreOffline.alSesionVencida(function(){ if(S.session) cerrarSesionLocal(); });
+  if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(function(){}); }
   sb.auth.getSession().then(function(res){
     S.session = res.data.session; S.authChecked = true;
+    // Sin internet no se puede renovar la sesión: se entra con el último usuario que inició sesión en este equipo.
+    var local = CuadreOffline.usuarioLocal();
+    var sinRed = !navigator.onLine || (res.error && /fetch|network/i.test(String(res.error.message||"")));
+    if(!S.session && local && sinRed){ CuadreOffline.marcarSinConexion(); S.session = {user:local, local:true}; }
+    if(S.session && S.session.user) CuadreOffline.recordarUsuario(S.session.user);
     render();
     if(S.session) afterLogin();
   });
   sb.auth.onAuthStateChange(function(event, session){
     var had = !!S.session;
     S.session = session;
+    if(session && session.user) CuadreOffline.recordarUsuario(session.user);
     if(session && !had){ render(); afterLogin(); }
     else if(!session && had){ teardownEmpresa(); S.empresas=[]; S.empresaId=null; clearMainChannels(); render(); }
   });
@@ -416,6 +485,7 @@ var CUENTAS_HARDCODED = [
   {cuenta_codigo:"530595", cuenta_nombre:"AJUSTE AL PESO - GASTO"}
 ];
 function afterLogin(){
+  CuadreOffline.sincronizar();   // sube lo que se hizo sin conexión (no hace nada si no hay pendientes)
   loadEmpresas().then(function(){ sincronizarCuentasDesdeReglas(CUENTAS_HARDCODED); });
   subscribeEmpresasRealtime();
   loadConfig();
@@ -428,6 +498,7 @@ function afterLogin(){
 async function loadConfig(){
   var res = await sb.from("config").select("*").eq("id","global").maybeSingle();
   if(res.error){ console.error(res.error); return; }
+  guardarCopiaLocal("config", null, res.data ? [res.data] : []);
   S.config = res.data || {uvt:52374, tasa_compras:2.5, tasa_arrendamientos:3.5, base_minima:524000};
 }
 async function guardarConfig(uvt, tc, ta, bm){
@@ -440,10 +511,20 @@ function clearMainChannels(){
 async function doLogin(email,pass){
   S.loginErr="";
   var res = await sb.auth.signInWithPassword({email:email,password:pass});
-  if(res.error){ S.loginErr = res.error.message==="Invalid login credentials" ? "Correo o contraseña incorrectos." : res.error.message; render(); return; }
+  if(res.error){
+    var m = res.error.message||"";
+    S.loginErr = m==="Invalid login credentials" ? "Correo o contraseña incorrectos."
+      : (/fetch|network/i.test(m) ? "No hay conexión a internet. Para entrar necesitas internet; si ya habías entrado en este computador, abre Cuadre de nuevo y se abrirá con tu copia guardada." : m);
+    render(); return;
+  }
 }
 function doLogout(){
-  sb.auth.signOut();
+  var st = CuadreOffline.estado();
+  if(st.pendientes>0 && !confirm("Tienes "+st.pendientes+" cambio(s) que todavía no se han subido a internet. Si cierras sesión ahora se perderán.\n\n¿Cerrar sesión de todos modos?")) return;
+  CuadreOffline.limpiar().then(function(){
+    var p = sb.auth.signOut();
+    return Promise.resolve(p).then(null, function(){});
+  }).then(function(){ if(S.session) cerrarSesionLocal(); });
 }
 
 /* ---------- empresas ---------- */
@@ -451,6 +532,7 @@ async function loadEmpresas(){
   var res = await sb.from("empresas").select("*").order("nombre");
   if(res.error){ console.error(res.error); return; }
   S.empresas = res.data || [];
+  guardarCopiaLocal("empresas", null, S.empresas);
   if(!S.empresaId && S.empresas.length){ selectEmpresa(S.empresas[0].id); }
   else if(S.empresaId && !S.empresas.some(function(e){return e.id===S.empresaId;})){
     S.empresaId = S.empresas.length?S.empresas[0].id:null;
@@ -505,7 +587,16 @@ async function loadAllRows(table, id, global){
       else all = all.concat(res.data||[]);
     });
   }
+  guardarCopiaLocal(table, global?null:id, all);
   return all;
+}
+// Guarda en este computador la última copia de una tabla, para poder trabajar sin internet.
+// Solo se guarda lo que vino de internet y cuando no hay cambios pendientes de subir
+// (si los hubiera, la copia del servidor todavía no los incluye).
+function guardarCopiaLocal(tabla, scope, filas){
+  var st = CuadreOffline.estado();
+  if(!st.online || st.pendientes>0 || st.sincronizando) return;
+  CuadreOffline.guardarTabla(tabla, scope, filas);
 }
 async function loadCuentas(id){
   var data = await loadAllRows("cuentas", id);
@@ -2110,7 +2201,7 @@ function sidebarHTML(){
       navItem("formularios","▧","Formularios DIAN") +
       navItem("periodos","◔","Periodos") +
     '</div>' +
-    '<div class="sidebar-foot">Sesión: <span class="who">'+esc(S.session.user.email)+'</span><br><a onclick="app.logout()">Cerrar sesión</a></div>' +
+    '<div class="sidebar-foot">'+estadoConexionHTML()+'Sesión: <span class="who">'+esc(S.session.user.email)+'</span><br><a onclick="app.logout()">Cerrar sesión</a></div>' +
   '</div>';
 }
 
@@ -3606,6 +3697,8 @@ window.app = {
     if(err){ alert(err); return; }
     render();
   },
+  sincronizarAhora: function(){ CuadreOffline.sincronizar(); },
+  guardarCopia: descargarParaSinConexion,
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
