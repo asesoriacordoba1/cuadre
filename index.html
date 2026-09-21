@@ -1958,6 +1958,20 @@ function buscarFacturaOriginal(docRefBuscado, tercNombre, tercNit){
   if(candidatos.length>1) return {_ambiguo:true, candidatos:candidatos};
   return candidatos[0];
 }
+// Facturas importadas antes de la regla de 6 dígitos guardan cuentas de 4 dígitos (2205, 2365, 2408...).
+// Al copiarlas para una nota crédito se convierten a su subcuenta de 6 dígitos.
+var CUENTA_4_A_6 = {"1105":"110505","1110":"111005","1305":"130505","1355":"135515","1435":"143501","2205":"220501","2365":"236540","2367":"236701","2368":"236801","2408":"240802","4135":"413501","4295":"429550","5120":"512002","5195":"519595","5305":"530595"};
+function normalizarLineasA6(lineas){
+  return (lineas||[]).map(function(l){
+    var c = String(l.cuenta||"");
+    if(c.length===4 && CUENTA_4_A_6[c]){
+      var nueva = CUENTA_4_A_6[c];
+      if(c==="2365" && /arrendamiento/i.test(l.detalle||"")) nueva = "236575";
+      c = nueva;
+    }
+    return Object.assign({}, l, {cuenta:c});
+  });
+}
 function repartirProporcional(lineas, monto, campo){
   var suma = lineas.reduce(function(a,l){ return a+(Number(l[campo])||0); },0);
   var acum = 0;
@@ -1968,7 +1982,7 @@ function repartirProporcional(lineas, monto, campo){
   });
 }
 function rebuildDevolucionCalibrada(fo, ncTotal, ncIva, docRef){
-  var lins = fo.lineas||[];
+  var lins = normalizarLineasA6(fo.lineas||[]);
   var pref = function(l,p){ return (l.cuenta||"").indexOf(p)===0; };
   var deb = function(l){ return Number(l.debito)||0; }, cre = function(l){ return Number(l.credito)||0; };
   var ivaLins = lins.filter(function(l){ return pref(l,"2408") && deb(l)>0; });
@@ -2015,7 +2029,7 @@ function rebuildDevolucionDesdeFactura(facturaOriginal, ncTotal, docRefBuscado, 
   var totalOriginal = Number(facturaOriginal.total_debito)||0;
   if(!totalOriginal) return null;
   var ratio = Number(ncTotal)/totalOriginal;
-  return (facturaOriginal.lineas||[]).map(function(l){
+  return normalizarLineasA6(facturaOriginal.lineas||[]).map(function(l){
     return {
       cuenta: l.cuenta,
       tercero: l.tercero||"",
