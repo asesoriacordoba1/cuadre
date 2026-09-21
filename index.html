@@ -415,30 +415,38 @@ async function descargarParaSinConexion(){
 /* ---------- respaldo completo en un archivo (independiente de Supabase) ---------- */
 var LS_RESPALDO = "cuadre_ultimo_respaldo";
 function nombreArchivoSeguro(s){ return String(s||"empresa").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,40); }
-async function guardarArchivoRespaldo(blob, nombre){
-  // Chrome/Edge: deja elegir la carpeta (empieza en el Escritorio). Otros navegadores: descarga normal.
-  if(window.showSaveFilePicker){
-    try{
-      var h = await window.showSaveFilePicker({suggestedName:nombre, startIn:"desktop", types:[{description:"Respaldo de Cuadre (.zip)", accept:{"application/zip":[".zip"]}}]});
-      var w = await h.createWritable(); await w.write(blob); await w.close();
-      return true;
-    }catch(err){
-      if(err && err.name==="AbortError") return false;   // canceló: no se cuenta como respaldo
-    }
+// El navegador solo permite abrir el selector de carpeta/archivo justo en el momento del clic.
+// Por eso el destino se pide ANTES de armar el respaldo (que tarda), y se escribe al final.
+async function pedirDestinoRespaldo(nombre, esCarpeta){
+  try{
+    if(esCarpeta && window.showDirectoryPicker) return {tipo:"carpeta", h: await window.showDirectoryPicker({mode:"readwrite", startIn:"desktop"})};
+    if(!esCarpeta && window.showSaveFilePicker) return {tipo:"archivo", h: await window.showSaveFilePicker({suggestedName:nombre, startIn:"desktop", types:[{description:"Respaldo de Cuadre (.zip)", accept:{"application/zip":[".zip"]}}]})};
+  }catch(err){
+    if(err && err.name==="AbortError") return null;   // canceló
   }
+  return {tipo:"descarga"};
+}
+function descargarBlob(blob, nombre){
   var a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = nombre;
   document.body.appendChild(a); a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-  return true;
+}
+async function escribirEnDestino(dest, blob, nombre){
+  if(dest.tipo==="archivo"){ var w = await dest.h.createWritable(); await w.write(blob); await w.close(); return; }
+  if(dest.tipo==="carpeta"){ var fh = await dest.h.getFileHandle(nombre, {create:true}); var w2 = await fh.createWritable(); await w2.write(blob); await w2.close(); return; }
+  descargarBlob(blob, nombre);
 }
 async function respaldoCompleto(){
   if(S.respaldoBusy) return;
   if(typeof JSZip==="undefined"){ alert("No se cargó el compresor. Recarga la página (Ctrl+F5) e inténtalo de nuevo."); return; }
+  var hoy = todayISO();
+  var nombreZip = "cuadre_respaldo_"+hoy+".zip";
+  var dest = await pedirDestinoRespaldo(nombreZip, false);   // se pide ya, mientras el clic está vigente
+  if(!dest){ S.respaldoMsg = "Respaldo cancelado: no se guardó ningún archivo."; render(); return; }
   S.respaldoBusy = true; S.respaldoMsg = "Preparando el respaldo…"; render();
   try{
     var zip = new JSZip();
-    var hoy = todayISO();
     var resumen = [];
     zip.file("LEEME.txt",
       "Respaldo de Cuadre generado el "+hoy+" por "+(S.session&&S.session.user?S.session.user.email:"")+".\r\n\r\n"+
@@ -467,12 +475,94 @@ async function respaldoCompleto(){
     zip.file("RESUMEN.txt", resumen.join("\r\n")+"\r\n");
     S.respaldoMsg = "Comprimiendo…"; render();
     var blob = await zip.generateAsync({type:"blob", compression:"DEFLATE", compressionOptions:{level:6}});
-    var guardado = await guardarArchivoRespaldo(blob, "cuadre_respaldo_"+hoy+".zip");
-    if(guardado){
-      try{ localStorage.setItem(LS_RESPALDO, String(Date.now())); }catch(e2){}
-      S.respaldoMsg = "Respaldo guardado ("+(blob.size/1048576).toFixed(1)+" MB). "+resumen.length+" empresa(s).";
-    } else S.respaldoMsg = "Respaldo cancelado: no se guardó ningún archivo.";
+    await escribirEnDestino(dest, blob, nombreZip);
+    try{ localStorage.setItem(LS_RESPALDO, String(Date.now())); }catch(e2){}
+    S.respaldoMsg = "Respaldo guardado como "+nombreZip+" ("+(blob.size/1048576).toFixed(1)+" MB). "+resumen.length+" empresa(s).";
   }catch(err){ S.respaldoMsg = "No se pudo hacer el respaldo: "+err.message; }
+  S.respaldoBusy = false; render();
+}
+/* ---------- respaldo en Excel: un libro por empresa, listo para abrir y leer ---------- */
+function hojaDeObjetos(filas, columnas, anchos){
+  var aoa = [columnas.map(function(c){ return c[1]; })];
+  filas.forEach(function(f){ aoa.push(columnas.map(function(c){ var v = f[c[0]]; return v==null ? "" : (typeof v==="object" ? JSON.stringify(v) : v); })); });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = columnas.map(function(c, i){ return {wch: (anchos && anchos[i]) || 16}; });
+  ws["!freeze"] = {xSplit:0, ySplit:1};
+  return ws;
+}
+function columnasDe(filas, excluir){
+  var set = {}, orden = [];
+  filas.forEach(function(f){ Object.keys(f).forEach(function(k){ if(k.charAt(0)!=="_" && !set[k] && (!excluir || excluir.indexOf(k)<0)){ set[k]=1; orden.push(k); } }); });
+  return orden.map(function(k){ return [k, k]; });
+}
+async function respaldoExcel(){
+  if(S.respaldoBusy) return;
+  if(typeof XLSX==="undefined"){ alert("No se cargó el módulo de Excel. Recarga la página (Ctrl+F5) e inténtalo de nuevo."); return; }
+  var hoy = todayISO();
+  var nombreCarpeta = "Cuadre_respaldo_Excel_"+hoy;
+  var dest = await pedirDestinoRespaldo(nombreCarpeta+".zip", true);   // se pide ya, mientras el clic está vigente
+  if(!dest){ S.respaldoMsg = "Respaldo cancelado: no se guardó ningún archivo."; render(); return; }
+  S.respaldoBusy = true; S.respaldoMsg = "Preparando el respaldo en Excel…"; render();
+  try{
+    var zipFallback = dest.tipo==="descarga" ? new JSZip() : null;
+    var carpeta = dest;
+    if(dest.tipo==="carpeta"){ carpeta = {tipo:"carpeta", h: await dest.h.getDirectoryHandle(nombreCarpeta, {create:true})}; }
+    var guardarLibro = async function(wb, nombre){
+      var buf = XLSX.write(wb, {bookType:"xlsx", type:"array", compression:true});
+      var blob = new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      if(zipFallback) zipFallback.file(nombre, buf); else await escribirEnDestino(carpeta, blob, nombre);
+      return blob.size;
+    };
+    var totalBytes = 0, resumen = [];
+    for(var i=0;i<S.empresas.length;i++){
+      var e = S.empresas[i];
+      var base = nombreArchivoSeguro(e.nombre);
+      S.respaldoMsg = "Excel: leyendo "+e.nombre+" ("+(i+1)+" de "+S.empresas.length+")…"; render();
+      var res = await Promise.all([loadAllRows("cuentas", e.id), loadAllRows("terceros", e.id), loadAllRows("comprobantes", e.id), loadAllRows("periodos", e.id)]);
+      var cuentas = res[0], terceros = res[1], comps = res[2], periodos = res[3];
+      S.respaldoMsg = "Excel: armando el libro de "+e.nombre+"…"; render();
+      await new Promise(function(r){ setTimeout(r, 30); });   // deja respirar la pantalla
+      var wb = XLSX.utils.book_new();
+      // Hoja 1: datos de la empresa
+      var datosEmp = [["Dato","Valor"]];
+      Object.keys(e).forEach(function(k){ if(k.charAt(0)!=="_") datosEmp.push([k, Array.isArray(e[k]) ? e[k].join(", ") : (e[k]==null ? "" : e[k])]); });
+      datosEmp.push(["respaldo_generado", hoy]);
+      var wsE = XLSX.utils.aoa_to_sheet(datosEmp); wsE["!cols"] = [{wch:28},{wch:60}];
+      XLSX.utils.book_append_sheet(wb, wsE, "Empresa");
+      // Terceros: todas las columnas que existan
+      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(terceros, columnasDe(terceros)), "Terceros");
+      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(cuentas, columnasDe(cuentas, ["empresa_id"])), "Plan de cuentas");
+      // Comprobantes (encabezados) y Detalle (una fila por línea contable)
+      var cab = comps.map(function(c){ return {id:c.id, numero:c.numero, tipo:c.tipo, fecha:c.fecha, periodo:c.periodo, descripcion:c.descripcion, tercero_nit:c.tercero_nit||"", total_debito:Number(c.total_debito)||0, total_credito:Number(c.total_credito)||0, estado:c.estado||"", cufe:c.cufe||""}; });
+      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(cab, columnasDe(cab), [38,20,8,12,10,60,14,16,16,14,40]), "Comprobantes");
+      var det = [];
+      comps.forEach(function(c){
+        (c.lineas||[]).forEach(function(l, k){
+          det.push({numero:c.numero, linea:k+1, tipo:c.tipo, fecha:c.fecha, cuenta:l.cuenta, detalle:l.detalle||"", tercero:l.tercero||"", debito:Number(l.debito)||0, credito:Number(l.credito)||0});
+        });
+      });
+      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(det, columnasDe(det), [20,7,8,12,12,60,12,16,16]), "Detalle");
+      if(periodos.length) XLSX.utils.book_append_sheet(wb, hojaDeObjetos(periodos, columnasDe(periodos, ["empresa_id"])), "Periodos");
+      totalBytes += await guardarLibro(wb, base+"_"+hoy+".xlsx");
+      resumen.push(e.nombre+": "+comps.length+" comprobantes ("+det.length+" líneas), "+terceros.length+" terceros, "+cuentas.length+" cuentas");
+      wb = null; det = null; cab = null; comps = null;
+    }
+    // Libro general: reglas de cuentas y parámetros
+    S.respaldoMsg = "Excel: datos generales…"; render();
+    var reglas = await loadAllRows("reglas_cuentas", null, true);
+    var wbG = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(reglas, columnasDe(reglas)), "Reglas de cuentas");
+    var cfgFilas = Object.keys(S.config||{}).map(function(k){ return {parametro:k, valor:S.config[k]}; });
+    XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(cfgFilas, [["parametro","parametro"],["valor","valor"]], [24,20]), "Parametros retencion");
+    XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(resumen.map(function(r){ return {resumen:r}; }), [["resumen","Resumen del respaldo "+hoy]], [110]), "Resumen");
+    totalBytes += await guardarLibro(wbG, "General_reglas_y_parametros_"+hoy+".xlsx");
+    if(zipFallback){
+      S.respaldoMsg = "Comprimiendo…"; render();
+      descargarBlob(await zipFallback.generateAsync({type:"blob", compression:"DEFLATE"}), nombreCarpeta+".zip");
+    }
+    try{ localStorage.setItem(LS_RESPALDO, String(Date.now())); }catch(e2){}
+    S.respaldoMsg = "Respaldo en Excel guardado ("+(totalBytes/1048576).toFixed(1)+" MB) en "+(dest.tipo==="carpeta" ? "la carpeta «"+nombreCarpeta+"»" : "Descargas como "+nombreCarpeta+".zip")+".";
+  }catch(err){ S.respaldoMsg = "No se pudo hacer el respaldo en Excel: "+err.message; }
   S.respaldoBusy = false; render();
 }
 function respaldoHTML(){
@@ -482,7 +572,7 @@ function respaldoHTML(){
   var estado = dias===null ? "Aún no has hecho ningún respaldo en archivo."
     : (dias===0 ? "Último respaldo: hoy." : "Último respaldo: hace "+dias+" día(s).");
   return '<div class="small" style="margin-top:6px;'+(viejo?'color:var(--danger,#c0392b);font-weight:600':'')+'">'+esc(estado)+'</div>' +
-    '<div class="small" style="margin-top:2px"><a onclick="app.respaldoCompleto()">'+(S.respaldoBusy?"Haciendo respaldo…":"Guardar respaldo en un archivo")+'</a></div>' +
+    '<div class="small" style="margin-top:2px"><a onclick="app.respaldoExcel()">'+(S.respaldoBusy?"Haciendo respaldo…":"Guardar respaldo en Excel")+'</a> · <a onclick="app.respaldoCompleto()">Respaldo técnico (.zip)</a></div>' +
     (S.respaldoMsg ? '<div class="small" style="margin-top:2px">'+esc(S.respaldoMsg)+'</div>' : '');
 }
 function estadoConexionHTML(){
@@ -3774,6 +3864,7 @@ window.app = {
   sincronizarAhora: function(){ CuadreOffline.sincronizar(); },
   guardarCopia: descargarParaSinConexion,
   respaldoCompleto: respaldoCompleto,
+  respaldoExcel: respaldoExcel,
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
