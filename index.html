@@ -495,6 +495,251 @@ function columnasDe(filas, excluir){
   filas.forEach(function(f){ Object.keys(f).forEach(function(k){ if(k.charAt(0)!=="_" && !set[k] && (!excluir || excluir.indexOf(k)<0)){ set[k]=1; orden.push(k); } }); });
   return orden.map(function(k){ return [k, k]; });
 }
+/* ---------- respaldo en Excel con el formato de Cowork: un libro por empresa ---------- */
+var MESES_MAYUS = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"];
+function mesDePer(per){ var p = String(per).split("-"); var n = parseInt(p[1],10)||1; return {anio:p[0], n:n, nombre:MESES_MAYUS[n-1], abr:MESES_MAYUS[n-1].slice(0,3)}; }
+function mesTitulo(per){ var m = mesDePer(per); return m.nombre.charAt(0)+m.nombre.slice(1).toLowerCase(); }
+function fechaDMY(iso){ if(!iso) return ""; var p = String(iso).slice(0,10).split("-"); return p[2]+"-"+p[1]+"-"+p[0]; }
+function partirDocumento(ref){ var m = /^(.*?)(\d+)$/.exec(ref||""); return m ? {prefijo:m[1], folio:m[2]} : {prefijo:"", folio:ref||""}; }
+function nitEmpresaSinDV(e){ return String((e && e.nit) || "").split("-")[0].replace(/\D/g,""); }
+function tipoDocTexto(c){
+  if(c.tipo==="CE") return "Documento soporte";
+  if(/^Nota Cr/.test(c.descripcion||"")) return "Nota de crédito electrónica";
+  return "Factura electrónica";
+}
+function esMercanciaComp(c){ return (c.lineas||[]).some(function(l){ return (l.cuenta||"").slice(0,2)==="14"; }); }
+function nitDeComprobante(c){
+  if(c.tercero_nit) return c.tercero_nit;
+  var tm = terceroDeComprobante(c);
+  return tm ? (tm.identificacion||"") : "";
+}
+function filaDian(c, esVenta, emp){
+  var d = partirDocumento(extractDocRefFromDescripcion(c.descripcion));
+  var s = ivaMainDe(c), ge = gravadaExentaDe(s);
+  var nombre = extractTercFromDescripcion(c.descripcion), nit = nitDeComprobante(c);
+  var total = Math.round(s.main + s.iva);
+  var nitE = nitEmpresaSinDV(emp);
+  return [tipoDocTexto(c), c.cufe||"", d.folio, d.prefijo, "COP", "", "", fechaDMY(c.fecha), "",
+    esVenta ? nitE : nit, esVenta ? emp.nombre : nombre, esVenta ? nit : nitE, esVenta ? nombre : emp.nombre,
+    Math.round(ge.exenta), Math.round(ge.gravada), Math.round(s.iva), Math.round(s.main), Math.round(s.iva), total, total, "Contabilizado", esVenta ? "Emitido" : "Recibido"];
+}
+var ENCABEZADO_DIAN = ["Tipo de documento","CUFE/CUDE","Folio","Prefijo","Divisa","Forma de Pago","Medio de Pago","Fecha Emisión","Fecha Recepción","NIT Emisor","Nombre Emisor","NIT Receptor","Nombre Receptor","EXENTO","BG 19","IVA 19","SUBTOTAL","TOTAL IVA","TOTAL","Total","Estado","Grupo"];
+function aplicarFormatoNumeros(ws, colsNumericas, filaDesde){
+  var ref = ws["!ref"]; if(!ref) return;
+  var rng = XLSX.utils.decode_range(ref);
+  for(var r = filaDesde; r <= rng.e.r; r++){
+    colsNumericas.forEach(function(c){
+      var cell = ws[XLSX.utils.encode_cell({r:r, c:c})];
+      if(cell && cell.t==="n") cell.z = "#,##0";
+    });
+  }
+}
+function hojaSimple(aoa, anchos, colsNum, filaNum){
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = anchos.map(function(w){ return {wch:w}; });
+  if(colsNum) aplicarFormatoNumeros(ws, colsNum, filaNum||0);
+  return ws;
+}
+function hojaListadoDian(titulo, filas){
+  var aoa = [[titulo], [], ENCABEZADO_DIAN].concat(filas);
+  return hojaSimple(aoa, [26,20,12,10,8,8,8,12,18,14,38,14,38,12,12,12,12,12,12,12,24,10], [13,14,15,16,17,18,19], 3);
+}
+function hojaGastosPorMes(titulo, nota, encabezado, filasPorMes, colsNum){
+  var aoa = [[titulo]];
+  if(nota) aoa.push([nota]);
+  aoa.push([]);
+  Object.keys(filasPorMes).sort().forEach(function(per){
+    aoa.push([mesTitulo(per)+" "+mesDePer(per).anio]);
+    aoa.push(encabezado);
+    filasPorMes[per].forEach(function(f){ aoa.push(f); });
+    aoa.push([]);
+  });
+  return hojaSimple(aoa, encabezado.map(function(_, i){ return [24,22,14,14,40,14,14,12,12][i] || 14; }), colsNum, 0);
+}
+function hojaTerceros(terceros){
+  var enc = ["NIT Receptor","RAZON SOCIAL","PRIMER APELLIDO","SEGUNDO APELLIDO","PRIMER NOMBRE","SEGUNDO NOMBRE","Dirección","Municipio o ciudad","Departamento","pais","Régimen Fiscal"];
+  var filas = terceros.slice().sort(function(a,b){ return (Number(normNit(a.identificacion))||0) - (Number(normNit(b.identificacion))||0); }).map(function(t){
+    var reg = t.autorretenedor ? "O-15/O-47 (sin retención)" : (t.regimen || (t.es_juridica ? "Persona Jurídica" : "R-99-PN"));
+    return [t.identificacion||"", t.es_juridica ? (t.razon_social||t.nombre||"") : "", t.primer_apellido||"", t.segundo_apellido||"", t.primer_nombre||"", t.otros_nombres||"", t.direccion||"", t.ciudad||"", t.departamento||"", t.pais||"", reg];
+  });
+  return hojaSimple([enc].concat(filas), [16,40,18,18,18,18,34,20,20,12,30]);
+}
+function hojaComprobanteMensual(per, empresaNombre){
+  var list = S.comprobantes.filter(function(c){ return c.periodo===per; });
+  var LABELS = {FV:"COMPROBANTE DE VENTAS", FV_NC:"COMPROBANTE DE DEVOLUCIONES EN VENTAS", FV_ARR:"COMPROBANTE DE INGRESOS POR ARRENDAMIENTO", FV_SEMOV:"COMPROBANTE DE VENTA DE SEMOVIENTES",
+    FC:"COMPROBANTE DE COMPRAS", FC_NC:"COMPROBANTE DE DEVOLUCIONES EN COMPRAS", FC_GASTO:"COMPROBANTE DE GASTOS", DC:"COMPROBANTE DE DESCUENTOS COMERCIALES CONDICIONADOS", CV:"COMPROBANTE DE COSTO DE VENTA"};
+  var bloques = {};
+  // Misma clasificación de bloques que usa el "Comprobante del mes" en pantalla.
+  list.forEach(function(c){
+    var desc = c.descripcion||"", key;
+    var esDevol = /^Nota Crédito/.test(desc), esDC = /^Descuento Condicionado/.test(desc);
+    var esIngEsp = (c.lineas||[]).some(function(l){ return l.cuenta==="424525"||l.cuenta==="413518"; });
+    if(esDC) key = "DC";
+    else if(c.tipo==="FV" || (c.tipo==="NC" && esIngEsp)){
+      if(esDevol) key = "FV_NC";
+      else key = (c.lineas||[]).some(function(l){return l.cuenta==="424525";}) ? "FV_ARR" : ((c.lineas||[]).some(function(l){return l.cuenta==="413518";}) ? "FV_SEMOV" : "FV");
+    } else if(c.tipo==="FC" || c.tipo==="CE"){
+      key = esDevol ? "FC_NC" : (esMercanciaComp(c) ? "FC" : "FC_GASTO");
+    } else key = c.tipo;
+    if(!bloques[key]) bloques[key] = {};
+    (c.lineas||[]).forEach(function(l){
+      var cu = l.cuenta||"";
+      if(!bloques[key][cu]) bloques[key][cu] = {d:0,c:0};
+      bloques[key][cu].d += Number(l.debito)||0;
+      bloques[key][cu].c += Number(l.credito)||0;
+    });
+  });
+  var orden = ["FV","FV_NC","FC","FC_NC","CV","FC_GASTO","DC","FV_ARR","FV_SEMOV","RC","CE","NC","NM"];
+  var claves = Object.keys(bloques).sort(function(a,b){ var x = orden.indexOf(a), y = orden.indexOf(b); return (x<0?99:x)-(y<0?99:y); });
+  var aoa = [[empresaNombre.toUpperCase()+" - COMPROBANTES CONTABLES"], [mesTitulo(per)+" "+mesDePer(per).anio], [], ["Cuenta","Débito","Crédito"]];
+  var totD = 0, totC = 0;
+  claves.forEach(function(k){
+    aoa.push([LABELS[k] || ("COMPROBANTE "+String(k).toUpperCase())]);
+    var sd = 0, sc = 0;
+    Object.keys(bloques[k]).sort().forEach(function(cu){
+      var v = bloques[k][cu], ac = cuentaByCodigo(cu);
+      aoa.push([cu+"-"+(ac ? ac.nombre : ""), v.d ? Math.round(v.d*100)/100 : "", v.c ? Math.round(v.c*100)/100 : ""]);
+      sd += v.d; sc += v.c;
+    });
+    aoa.push(["Subtotal "+(LABELS[k] || k), Math.round(sd*100)/100, Math.round(sc*100)/100]);
+    aoa.push([]);
+    totD += sd; totC += sc;
+  });
+  aoa.push(["TOTAL GENERAL", Math.round(totD*100)/100, Math.round(totC*100)/100]);
+  return hojaSimple(aoa, [64,18,18], [1,2], 3);
+}
+function hoja350Mes(per, empresaNombre){
+  formulario350HTML(per);   // calcula el detalle y lo deja en S._det350
+  var d = S._det350;
+  if(!d || !d.filas || !d.filas.length) return null;
+  var aoa = [[empresaNombre.toUpperCase()+" - RETENCIÓN EN LA FUENTE POR COMPRAS"], [mesTitulo(per)+" "+mesDePer(per).anio+" · Base para el Formulario 350 (Declaración mensual de retención en la fuente)"], [], ["RESUMEN PARA FORMULARIO 350"], [], ["Concepto","Casilla base","Base","Casilla retención","Retención"]];
+  var totB = 0, totR = 0;
+  SECCIONES_350.forEach(function(sec){
+    var f = d.filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var b = 0, r = 0; f.forEach(function(x){ b += x.base; r += x.ret; });
+    totB += b; totR += r;
+    var cas = sec[2].split(" / ");
+    aoa.push([sec[1], cas[0]||"", Math.round(b), cas[1]||"", Math.round(r)]);
+  });
+  aoa.push(["TOTAL","",Math.round(totB),"",Math.round(totR)], [], []);
+  SECCIONES_350.forEach(function(sec){
+    var f = d.filas.filter(function(x){ return x.sec===sec[0]; });
+    if(!f.length) return;
+    var b = 0, r = 0;
+    aoa.push(["DETALLE - "+sec[1].toUpperCase()]);
+    aoa.push(["NIT","Tercero","Fecha","Tipo Documento","N° documento","Base","Retención"]);
+    f.forEach(function(x){ b += x.base; r += x.ret; aoa.push([x.nit, x.tercero, fechaDMY(x.fecha), x.tipoDoc, x.doc, Math.round(x.base), Math.round(x.ret)]); });
+    aoa.push(["","","","","Total",Math.round(b),Math.round(r)], []);
+  });
+  return hojaSimple(aoa, [48,46,14,28,16,16,14], [2,4,5,6], 5);
+}
+function hoja300Bimestre(per, empresaNombre){
+  formulario300HTML(per);   // deja el cálculo en S._res300
+  var r = S._res300; if(!r) return null;
+  var bim = r.bim, m1 = mesDePer(bim.periodos[0]), m2 = mesDePer(bim.periodos[1]);
+  var n = function(v){ return Math.round(Number(v)||0); };
+  var aoa = [
+    [empresaNombre.toUpperCase()+" - IVA (FORMULARIO 300)"],
+    [mesTitulo(bim.periodos[0])+"-"+mesTitulo(bim.periodos[1])+" "+m2.anio+" · Declaración del Impuesto sobre las Ventas - IVA (bimestral) · Periodo DIAN "+bim.codigo],
+    [], ["INGRESOS (VENTAS)"], ["Concepto","Casilla","Valor"],
+    ["Por operaciones gravadas a la tarifa general",28,n(r.c28)],
+    ["Por operaciones exentas/excluidas",35,n(r.c35)],
+    ["Total ingresos brutos",41,n(r.c41)],
+    ["Devoluciones en ventas anuladas, rescindidas o resueltas",42,n(r.c42)],
+    ["Total ingresos netos recibidos durante el período",43,n(r.c43)],
+    ["Total impuesto generado por operaciones gravadas",67,n(r.c67)],
+    [], ["COMPRAS"], ["Concepto","Casilla","Valor"],
+    ["De bienes gravados a la tarifa general (nacionales)",51,n(r.c51)],
+    ["De bienes y servicios excluidos, exentos y no gravados",54,n(r.c54)],
+    ["Total compras e importaciones brutas",55,n(r.c55)],
+    ["Devoluciones en compras anuladas, rescindidas o resueltas en este período",56,n(r.c56)],
+    ["Total compras netas realizadas durante el período",57,n(r.c57)],
+    ["Por compras de bienes gravados a la tarifa general (impuesto descontable)",72,n(r.c72)],
+    ["Total impuestos descontables",81,n(r.c81)],
+    [], ["LIQUIDACIÓN"],
+    r.c82>0 ? ["Saldo a pagar del período fiscal",82,n(r.c82)] : ["Saldo a favor del período fiscal",83,n(r.c83)],
+    [], ["DESGLOSE MENSUAL (referencia)"], [], ["Mes","IVA Generado (67)","IVA Descontable (81)","Saldo"]
+  ];
+  r.meses.forEach(function(x){
+    aoa.push([mesTitulo(x.periodo), n(x.gen), n(x.desc), (x.neto>=0?"A pagar ":"A favor ")+Math.abs(n(x.neto)).toLocaleString("es-CO")]);
+  });
+  return hojaSimple(aoa, [76,18,20,22], [1,2], 4);
+}
+// Ejecuta fn con los datos de otra empresa cargados en el estado de la aplicación y luego lo restaura.
+async function conDatosDeEmpresa(e, datos, fn){
+  var g = {id:S.empresaId, comps:S.comprobantes, terc:S.terceros, cuen:S.cuentas};
+  S.empresaId = e.id;
+  S.comprobantes = datos.comps.map(function(r){ var x = Object.assign({}, r); x._id = x.numero; return x; }).sort(function(a,b){ return a.fecha<b.fecha?-1:(a.fecha>b.fecha?1:(a.numero||"").localeCompare(b.numero||"")); });
+  S.terceros = datos.terceros.map(function(r){ var x = Object.assign({}, r); x._id = x.id; return x; });
+  S.cuentas = datos.cuentas.map(function(r){ var x = Object.assign({}, r); x._id = x.codigo; return x; });
+  try{ return await fn(); }
+  finally{ S.empresaId = g.id; S.comprobantes = g.comps; S.terceros = g.terc; S.cuentas = g.cuen; }
+}
+function libroCoworkDeEmpresa(e, datos){
+  var wb = XLSX.utils.book_new();
+  var emp = e;
+  var comps = S.comprobantes;
+  var esPersonal = function(c){ return /\[personal\]/.test(c.descripcion||""); };
+  var esDiverso = function(c){ return /\[diverso\]/.test(c.descripcion||""); };
+  var ventas = comps.filter(function(c){ return c.tipo==="FV"; });
+  var compras = comps.filter(function(c){ return (c.tipo==="FC") && !esPersonal(c) && !esDiverso(c) && esMercanciaComp(c); });
+  var gastos = comps.filter(function(c){ return (c.tipo==="FC" || c.tipo==="CE") && !esPersonal(c) && (esDiverso(c) || !esMercanciaComp(c)) && !/^Nota Cr/.test(c.descripcion||""); });
+  var personales = comps.filter(function(c){ return c.tipo==="FC" && esPersonal(c); });
+  var anios = {}; comps.forEach(function(c){ if(c.periodo) anios[c.periodo.slice(0,4)] = 1; });
+  var anioTxt = Object.keys(anios).sort().slice(-1)[0] || "";
+  XLSX.utils.book_append_sheet(wb, hojaListadoDian(emp.nombre.toUpperCase()+" - VENTAS  - "+anioTxt, ventas.map(function(c){ return filaDian(c, true, emp); })), "VENTAS");
+  XLSX.utils.book_append_sheet(wb, hojaListadoDian(emp.nombre.toUpperCase()+" - COMPRAS - "+anioTxt, compras.map(function(c){ return filaDian(c, false, emp); })), "COMPRAS");
+  var porMes = function(lista, fila){
+    var o = {};
+    lista.forEach(function(c){ (o[c.periodo] = o[c.periodo] || []).push(fila(c)); });
+    return o;
+  };
+  XLSX.utils.book_append_sheet(wb, hojaGastosPorMes(emp.nombre.toUpperCase()+" - GASTOS EMPRESA "+anioTxt, "", ["Concepto","Tipo de documento","Fecha Emisión","NIT Emisor","Nombre Emisor","IVA","Total","Forma de Pago","Medio de Pago"],
+    porMes(gastos, function(c){
+      var tm = terceroDeComprobante(c);
+      var conc = (tm && (CONCEPTO_LABELS[tm.concepto_retencion] || tm.concepto_retencion)) || "";
+      if(!conc){ var ld = (c.lineas||[]).filter(function(l){ return (Number(l.debito)||0)>0 && (l.cuenta||"").slice(0,1)==="5"; })[0]; var ac = ld && cuentaByCodigo(ld.cuenta); conc = ac ? ac.nombre : "Diversos"; }
+      return [conc, tipoDocTexto(c), fechaDMY(c.fecha), nitDeComprobante(c), extractTercFromDescripcion(c.descripcion), Math.round(ivaMainDe(c).iva), Math.round(Number(c.total_debito)||0), "", ""];
+    }), [5,6]), "GASTOS EMPRESA");
+  XLSX.utils.book_append_sheet(wb, hojaGastosPorMes(emp.nombre.toUpperCase()+" - RELACIÓN FACTURAS GASTOS PERSONALES", "Documentos excluidos de la contabilidad (no incluidos en V/C/G ni en los comprobantes)", ["Fecha","NIT","Tipo Doc.","Prefijo","Folio","Nombre Tercero","IVA","Total"],
+    porMes(personales, function(c){
+      var d = partirDocumento(extractDocRefFromDescripcion(c.descripcion));
+      return [fechaDMY(c.fecha), nitDeComprobante(c), tipoDocTexto(c), d.prefijo, d.folio, extractTercFromDescripcion(c.descripcion), Math.round(ivaMainDe(c).iva), Math.round(Number(c.total_debito)||0)];
+    }), [6,7]), "GASTOS PERSONALES");
+  XLSX.utils.book_append_sheet(wb, hojaTerceros(S.terceros), "TERCEROS");
+  var periodos = Object.keys(comps.reduce(function(o,c){ if(c.periodo) o[c.periodo]=1; return o; }, {})).sort();
+  var variosAnios = Object.keys(anios).length>1;
+  var nombreMes = function(per){ var m = mesDePer(per); return m.nombre + (variosAnios ? " "+m.anio : ""); };
+  periodos.slice().reverse().forEach(function(per){
+    XLSX.utils.book_append_sheet(wb, hojaComprobanteMensual(per, emp.nombre), ("COMPROBANTES "+nombreMes(per)).slice(0,31));
+  });
+  periodos.slice().reverse().forEach(function(per){
+    var h = hoja350Mes(per, emp.nombre);
+    if(h) XLSX.utils.book_append_sheet(wb, h, ("F350 "+nombreMes(per)).slice(0,31));
+  });
+  var vistos = {};
+  periodos.slice().reverse().forEach(function(per){
+    var bim = bimestreDePeriodo(per);
+    if(vistos[bim.codigo+bim.label]) return;
+    vistos[bim.codigo+bim.label] = 1;
+    var h = hoja300Bimestre(per, emp.nombre);
+    if(h){ var a = mesDePer(bim.periodos[0]), b = mesDePer(bim.periodos[1]); XLSX.utils.book_append_sheet(wb, h, ("IVA FORM 300 "+a.abr+"-"+b.abr+" "+b.anio).slice(0,31)); }
+  });
+  // Datos completos (con identificadores) para poder restaurar todo desde este libro.
+  var cab = comps.map(function(c){ return {id:c.id, numero:c.numero, tipo:c.tipo, fecha:c.fecha, periodo:c.periodo, descripcion:c.descripcion, tercero_nit:c.tercero_nit||"", total_debito:Number(c.total_debito)||0, total_credito:Number(c.total_credito)||0, estado:c.estado||"", cufe:c.cufe||""}; });
+  XLSX.utils.book_append_sheet(wb, hojaDeObjetos(cab, columnasDe(cab), [38,20,8,12,10,60,14,16,16,14,40]), "BD_COMPROBANTES");
+  var det = [];
+  comps.forEach(function(c){ (c.lineas||[]).forEach(function(l, k){ det.push({numero:c.numero, linea:k+1, tipo:c.tipo, fecha:c.fecha, cuenta:l.cuenta, detalle:l.detalle||"", tercero:l.tercero||"", debito:Number(l.debito)||0, credito:Number(l.credito)||0}); }); });
+  XLSX.utils.book_append_sheet(wb, hojaDeObjetos(det, columnasDe(det), [20,7,8,12,12,60,12,16,16]), "BD_DETALLE");
+  XLSX.utils.book_append_sheet(wb, hojaDeObjetos(datos.terceros, columnasDe(datos.terceros)), "BD_TERCEROS");
+  XLSX.utils.book_append_sheet(wb, hojaDeObjetos(datos.cuentas, columnasDe(datos.cuentas, ["empresa_id"])), "BD_CUENTAS");
+  var datosEmp = [["Dato","Valor"]];
+  Object.keys(e).forEach(function(k){ if(k.charAt(0)!=="_") datosEmp.push([k, Array.isArray(e[k]) ? e[k].join(", ") : (e[k]==null ? "" : e[k])]); });
+  var wsE = XLSX.utils.aoa_to_sheet(datosEmp); wsE["!cols"] = [{wch:28},{wch:60}];
+  XLSX.utils.book_append_sheet(wb, wsE, "EMPRESA");
+  return {wb:wb, anio:anioTxt, nComps:comps.length, nLineas:det.length, nTerc:S.terceros.length};
+}
 async function respaldoExcel(){
   if(S.respaldoBusy) return;
   if(typeof XLSX==="undefined"){ alert("No se cargó el módulo de Excel. Recarga la página (Ctrl+F5) e inténtalo de nuevo."); return; }
@@ -516,53 +761,35 @@ async function respaldoExcel(){
     var totalBytes = 0, resumen = [];
     for(var i=0;i<S.empresas.length;i++){
       var e = S.empresas[i];
-      var base = nombreArchivoSeguro(e.nombre);
       S.respaldoMsg = "Excel: leyendo "+e.nombre+" ("+(i+1)+" de "+S.empresas.length+")…"; render();
-      var res = await Promise.all([loadAllRows("cuentas", e.id), loadAllRows("terceros", e.id), loadAllRows("comprobantes", e.id), loadAllRows("periodos", e.id)]);
-      var cuentas = res[0], terceros = res[1], comps = res[2], periodos = res[3];
-      S.respaldoMsg = "Excel: armando el libro de "+e.nombre+"…"; render();
-      await new Promise(function(r){ setTimeout(r, 30); });   // deja respirar la pantalla
-      var wb = XLSX.utils.book_new();
-      // Hoja 1: datos de la empresa
-      var datosEmp = [["Dato","Valor"]];
-      Object.keys(e).forEach(function(k){ if(k.charAt(0)!=="_") datosEmp.push([k, Array.isArray(e[k]) ? e[k].join(", ") : (e[k]==null ? "" : e[k])]); });
-      datosEmp.push(["respaldo_generado", hoy]);
-      var wsE = XLSX.utils.aoa_to_sheet(datosEmp); wsE["!cols"] = [{wch:28},{wch:60}];
-      XLSX.utils.book_append_sheet(wb, wsE, "Empresa");
-      // Terceros: todas las columnas que existan
-      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(terceros, columnasDe(terceros)), "Terceros");
-      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(cuentas, columnasDe(cuentas, ["empresa_id"])), "Plan de cuentas");
-      // Comprobantes (encabezados) y Detalle (una fila por línea contable)
-      var cab = comps.map(function(c){ return {id:c.id, numero:c.numero, tipo:c.tipo, fecha:c.fecha, periodo:c.periodo, descripcion:c.descripcion, tercero_nit:c.tercero_nit||"", total_debito:Number(c.total_debito)||0, total_credito:Number(c.total_credito)||0, estado:c.estado||"", cufe:c.cufe||""}; });
-      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(cab, columnasDe(cab), [38,20,8,12,10,60,14,16,16,14,40]), "Comprobantes");
-      var det = [];
-      comps.forEach(function(c){
-        (c.lineas||[]).forEach(function(l, k){
-          det.push({numero:c.numero, linea:k+1, tipo:c.tipo, fecha:c.fecha, cuenta:l.cuenta, detalle:l.detalle||"", tercero:l.tercero||"", debito:Number(l.debito)||0, credito:Number(l.credito)||0});
-        });
-      });
-      XLSX.utils.book_append_sheet(wb, hojaDeObjetos(det, columnasDe(det), [20,7,8,12,12,60,12,16,16]), "Detalle");
-      if(periodos.length) XLSX.utils.book_append_sheet(wb, hojaDeObjetos(periodos, columnasDe(periodos, ["empresa_id"])), "Periodos");
-      totalBytes += await guardarLibro(wb, base+"_"+hoy+".xlsx");
-      resumen.push(e.nombre+": "+comps.length+" comprobantes ("+det.length+" líneas), "+terceros.length+" terceros, "+cuentas.length+" cuentas");
-      wb = null; det = null; cab = null; comps = null;
+      var res = await Promise.all([loadAllRows("cuentas", e.id), loadAllRows("terceros", e.id), loadAllRows("comprobantes", e.id)]);
+      var datos = {cuentas:res[0], terceros:res[1], comps:res[2]};
+      if(!datos.comps.length){ resumen.push(e.nombre+": sin comprobantes (no se genera libro)"); continue; }
+      S.respaldoMsg = "Excel: armando el libro de "+e.nombre+" (ventas, compras, comprobantes, formularios)…"; render();
+      await new Promise(function(r){ setTimeout(r, 40); });   // deja respirar la pantalla
+      var libro = await conDatosDeEmpresa(e, datos, function(){ return libroCoworkDeEmpresa(e, datos); });
+      S.respaldoMsg = "Excel: guardando el libro de "+e.nombre+"…"; render();
+      await new Promise(function(r){ setTimeout(r, 40); });
+      totalBytes += await guardarLibro(libro.wb, "COMPROBANTES "+libro.anio+" - "+nombreArchivoSeguro(e.nombre)+".xlsx");
+      resumen.push(e.nombre+": "+libro.nComps+" comprobantes ("+libro.nLineas+" líneas), "+libro.nTerc+" terceros");
+      libro = null; datos = null;
     }
-    // Libro general: reglas de cuentas y parámetros
     S.respaldoMsg = "Excel: datos generales…"; render();
     var reglas = await loadAllRows("reglas_cuentas", null, true);
     var wbG = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(reglas, columnasDe(reglas)), "Reglas de cuentas");
     var cfgFilas = Object.keys(S.config||{}).map(function(k){ return {parametro:k, valor:S.config[k]}; });
     XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(cfgFilas, [["parametro","parametro"],["valor","valor"]], [24,20]), "Parametros retencion");
+    XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(S.empresas.map(function(x){ return Object.assign({}, x, {responsabilidades:(x.responsabilidades||[]).join(", ")}); }), columnasDe(S.empresas)), "Empresas");
     XLSX.utils.book_append_sheet(wbG, hojaDeObjetos(resumen.map(function(r){ return {resumen:r}; }), [["resumen","Resumen del respaldo "+hoy]], [110]), "Resumen");
-    totalBytes += await guardarLibro(wbG, "General_reglas_y_parametros_"+hoy+".xlsx");
+    totalBytes += await guardarLibro(wbG, "GENERAL reglas y parametros "+hoy+".xlsx");
     if(zipFallback){
       S.respaldoMsg = "Comprimiendo…"; render();
       descargarBlob(await zipFallback.generateAsync({type:"blob", compression:"DEFLATE"}), nombreCarpeta+".zip");
     }
     try{ localStorage.setItem(LS_RESPALDO, String(Date.now())); }catch(e2){}
     S.respaldoMsg = "Respaldo en Excel guardado ("+(totalBytes/1048576).toFixed(1)+" MB) en "+(dest.tipo==="carpeta" ? "la carpeta «"+nombreCarpeta+"»" : "Descargas como "+nombreCarpeta+".zip")+".";
-  }catch(err){ S.respaldoMsg = "No se pudo hacer el respaldo en Excel: "+err.message; }
+  }catch(err){ S.respaldoMsg = "No se pudo hacer el respaldo en Excel: "+err.message; console.error(err); }
   S.respaldoBusy = false; render();
 }
 function respaldoHTML(){
@@ -2917,8 +3144,10 @@ function formulario300HTML(per){
       else if(esCompraLike && !esPersonal) desc += devol ? -s.iva : s.iva;
     });
     var neto = gen-desc;
-    return {periodo:p, label: neto>=0?("A pagar "+fmtCOP(neto)):("A favor "+fmtCOP(-neto))};
+    return {periodo:p, label: neto>=0?("A pagar "+fmtCOP(neto)):("A favor "+fmtCOP(-neto)), gen:gen, desc:desc, neto:neto};
   });
+  // Resultados numéricos para el respaldo en Excel (mismo cálculo que se muestra en pantalla).
+  S._res300 = {bim:bim, c28:c28, c35:c35, c41:c41, c42:c42, c43:c43, c67:c67, c51:c51, c54:c54, c55:c55, c56:c56, c57:c57, c72:c72, c81:c81, c82:c82, c83:c83, meses:meses};
 
   var html = '<div class="card card-pad">' +
     '<div class="section-title">Declaración IVA — Formulario 300 · '+esc(bim.label)+'</div>' +
