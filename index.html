@@ -3537,7 +3537,10 @@ function dianConectarCardHTML(){
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+ocupado+'>' +
     '<label class="small">Desde <input type="date" id="dian-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+ocupado+'></label>' +
     '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
+    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-notas" checked '+ocupado+'> Traer también los XML de las notas crédito y aplicarlos</label>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.dianTraerNotas()" '+ocupado+'>Solo traer XML de notas crédito</button></div>' +
     (S.dianMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianMsg)+'</div>' : '') +
+    (S.dianDiag ? '<div class="small" style="margin-top:8px">Detalle técnico (cópialo y envíaselo a Claude si hace falta):</div><textarea readonly style="width:100%;height:160px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianDiag)+'</textarea>' : '') +
     '<details style="margin-top:14px"><summary class="small" style="cursor:pointer">Prueba técnica (avanzado)</summary>' +
       '<p class="small" style="margin:8px 0">Comprueba la conexión y, si escribes fechas, pide un listado corto para ver la respuesta de la DIAN. Usa el mismo enlace del campo de arriba.</p>' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="small">Desde <input type="date" id="dian-t-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-t-hasta" '+ocupado+'></label>' +
@@ -3551,6 +3554,44 @@ async function mensajeDeErrorFuncion(err){
   try{ if(err && err.context && err.context.json){ var j = await err.context.json(); if(j && j.error) msg = j.error; } }catch(e){}
   return msg;
 }
+// Espera a que la vista previa del listado termine de armarse.
+async function esperarVistaPrevia(){
+  for(var i=0;i<300;i++){
+    if(!S.importBusy && (S.importRows || S.importErr)) return;
+    await new Promise(function(r){ setTimeout(r, 300); });
+  }
+}
+// Baja de la DIAN el XML de cada nota crédito de compra de la vista previa y los aplica con el lector de XML.
+async function dianTraerNotas(urlDado){
+  var url = (typeof urlDado==="string" && urlDado) ? urlDado : ((document.getElementById("dian-enlace")||{}).value || "").trim();
+  if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
+  var filas = (S.importRows||[]).filter(function(r){ return r.esNC && !r.esVenta && !r.dup && r.cufe; });
+  if(!filas.length){ S.dianMsg = "No hay notas crédito de compra en la vista previa. Primero trae o sube el listado."; render(); return; }
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para bajar los XML."); return; }
+  var cudes = filas.map(function(r){ return String(r.cufe).trim().toLowerCase(); });
+  S.dianBusy = true; S.dianDiag = ""; S.dianMsg = "Pidiendo a la DIAN el XML de "+cudes.length+" nota(s) crédito…"; render();
+  var archivos = [], fallidos = 0, diag = [], errorMsg = "";
+  try{
+    for(var i=0;i<cudes.length;i+=40){
+      S.dianMsg = "Descargando XML de notas crédito ("+Math.min(i+40, cudes.length)+" de "+cudes.length+")…"; render();
+      var r = await sb.real.functions.invoke("dian-notas", {body:{url:url, cudes:cudes.slice(i, i+40)}});
+      if(r.error){ errorMsg = await mensajeDeErrorFuncion(r.error); break; }
+      (r.data.resultados||[]).forEach(function(x){ archivos.push(new File([x.xml], x.cude+".xml", {type:"text/xml"})); });
+      fallidos += r.data.fallidos||0;
+      if(r.data.diagnostico && r.data.diagnostico.length) diag = diag.concat(r.data.diagnostico);
+    }
+  }catch(err){ errorMsg = (err && err.message) || String(err); }
+  S.dianBusy = false;
+  if(errorMsg && !archivos.length){ S.dianMsg = "No se pudieron bajar los XML: "+errorMsg; render(); return; }
+  if(!archivos.length){
+    S.dianMsg = "La DIAN no entregó ningún XML de las "+cudes.length+" notas. Revisa el detalle técnico de abajo.";
+    S.dianDiag = JSON.stringify(diag, null, 2); render(); return;
+  }
+  S.dianMsg = archivos.length+" XML descargados de la DIAN"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+(errorMsg?(" · se detuvo: "+errorMsg):"")+". Aplicándolos a las notas…"; render();
+  await cargarXmlNotasCredito(archivos);   // mismo lector de XML de siempre; deja su resumen en el cuadro de notas crédito
+  S.dianMsg = archivos.length+" XML descargados de la DIAN"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+". Ya se aplicaron a las notas: mira el resumen en el cuadro «Notas crédito» y las marcas en cada fila.";
+  render();
+}
 async function dianTraerListado(){
   var url = ((document.getElementById("dian-enlace")||{}).value || "").trim();
   var desde = ((document.getElementById("dian-desde")||{}).value || "").trim(), hasta = ((document.getElementById("dian-hasta")||{}).value || "").trim();   // AAAA-MM-DD
@@ -3560,6 +3601,7 @@ async function dianTraerListado(){
   if((Date.parse(hasta) - Date.parse(desde)) / 86400000 > 92){ alert("El rango es muy largo. Pide como máximo 3 meses por vez."); return; }
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para traer el listado."); return; }
   var rangoTxt = fechaDMY(desde)+" a "+fechaDMY(hasta);
+  var conNotas = !!(document.getElementById("dian-notas") && document.getElementById("dian-notas").checked);   // se lee antes de redibujar
   S.dianBusy = true; S.dianMsg = "Pidiendo el listado del "+rangoTxt+" a la DIAN. Puede tardar hasta 2 minutos, no cierres esta ventana…"; render();
   try{
     var r = await sb.real.functions.invoke("dian-listado", {body:{url:url, desde:desde, hasta:hasta, grupo:"0"}});
@@ -3576,6 +3618,7 @@ async function dianTraerListado(){
     S.dianBusy = false;
     S.dianMsg = "Listo: "+archivo.name+" (del "+rangoTxt+"). Revisa la vista previa de abajo antes de importar.";
     handleImportFile(archivo);
+    if(conNotas){ await esperarVistaPrevia(); await dianTraerNotas(url); }
   }catch(err){ S.dianMsg = "No se pudo traer el listado: "+(err && err.message || err); S.dianBusy = false; render(); }
 }
 async function dianProbar(){
@@ -4163,6 +4206,7 @@ window.app = {
   respaldoExcel: respaldoExcel,
   dianProbar: dianProbar,
   dianTraerListado: dianTraerListado,
+  dianTraerNotas: function(){ dianTraerNotas(); },
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
