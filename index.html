@@ -3533,7 +3533,7 @@ function dianConectarCardHTML(){
   var ocupado = S.dianBusy ? "disabled" : "";
   return '<div class="card card-pad" style="margin-top:16px">' +
     '<div class="section-title">Traer el listado directo desde la DIAN</div>' +
-    '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>), elige el mes y Cuadre pide el listado a la DIAN, lo descarga y lo abre en la vista previa de abajo, igual que si hubieras subido el Excel. <b>Todavía no guarda nada</b>: tú revisas y confirmas. El enlace se usa una sola vez y no se guarda; pide uno nuevo por cada mes.</p>' +
+    '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>), elige el mes y Cuadre pide el listado a la DIAN, lo descarga y lo abre en la vista previa de abajo, igual que si hubieras subido el Excel. <b>Todavía no guarda nada</b>: tú revisas y confirmas. El enlace de la DIAN vale 60 minutos: puedes usar el mismo para traer varios meses seguidos. Cuadre no lo guarda.</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+ocupado+'>' +
     '<label class="small">Mes <input type="month" id="dian-mes" '+ocupado+'></label>' +
     '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
