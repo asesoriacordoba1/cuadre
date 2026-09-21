@@ -412,6 +412,79 @@ async function descargarParaSinConexion(){
   }catch(err){ S.copiaMsg = "No se pudo guardar la copia: "+err.message; }
   S.copiaBusy = false; render();
 }
+/* ---------- respaldo completo en un archivo (independiente de Supabase) ---------- */
+var LS_RESPALDO = "cuadre_ultimo_respaldo";
+function nombreArchivoSeguro(s){ return String(s||"empresa").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"").slice(0,40); }
+async function guardarArchivoRespaldo(blob, nombre){
+  // Chrome/Edge: deja elegir la carpeta (empieza en el Escritorio). Otros navegadores: descarga normal.
+  if(window.showSaveFilePicker){
+    try{
+      var h = await window.showSaveFilePicker({suggestedName:nombre, startIn:"desktop", types:[{description:"Respaldo de Cuadre (.zip)", accept:{"application/zip":[".zip"]}}]});
+      var w = await h.createWritable(); await w.write(blob); await w.close();
+      return true;
+    }catch(err){
+      if(err && err.name==="AbortError") return false;   // canceló: no se cuenta como respaldo
+    }
+  }
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = nombre;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  return true;
+}
+async function respaldoCompleto(){
+  if(S.respaldoBusy) return;
+  if(typeof JSZip==="undefined"){ alert("No se cargó el compresor. Recarga la página (Ctrl+F5) e inténtalo de nuevo."); return; }
+  S.respaldoBusy = true; S.respaldoMsg = "Preparando el respaldo…"; render();
+  try{
+    var zip = new JSZip();
+    var hoy = todayISO();
+    var resumen = [];
+    zip.file("LEEME.txt",
+      "Respaldo de Cuadre generado el "+hoy+" por "+(S.session&&S.session.user?S.session.user.email:"")+".\r\n\r\n"+
+      "Contiene TODA la información en archivos .json (texto), una carpeta por empresa:\r\n"+
+      "  cuentas.json, terceros.json, comprobantes.json, periodos.json\r\n"+
+      "y, en la raíz: empresas.json, config.json, reglas_cuentas.json.\r\n\r\n"+
+      "Sirve para recuperar todo si Supabase se pausa o se pierde: los datos conservan sus identificadores originales.\r\n"+
+      "Guárdalo en un lugar seguro (disco externo o la nube) y no lo edites a mano.\r\n");
+    zip.file("empresas.json", JSON.stringify(S.empresas));
+    for(var i=0;i<S.empresas.length;i++){
+      var e = S.empresas[i];
+      var carpeta = "empresas/"+nombreArchivoSeguro(e.nombre)+"_"+String(e.id).slice(0,8)+"/";
+      var conteo = {};
+      var tablas = ["cuentas","terceros","comprobantes","periodos"];
+      for(var k=0;k<tablas.length;k++){
+        S.respaldoMsg = "Respaldando "+e.nombre+" · "+tablas[k]+" ("+(i+1)+" de "+S.empresas.length+")…"; render();
+        var filas = await loadAllRows(tablas[k], e.id);
+        conteo[tablas[k]] = filas.length;
+        zip.file(carpeta+tablas[k]+".json", JSON.stringify(filas));
+      }
+      resumen.push(e.nombre+": "+conteo.comprobantes+" comprobantes, "+conteo.terceros+" terceros, "+conteo.cuentas+" cuentas");
+    }
+    S.respaldoMsg = "Guardando datos generales…"; render();
+    zip.file("reglas_cuentas.json", JSON.stringify(await loadAllRows("reglas_cuentas", null, true)));
+    zip.file("config.json", JSON.stringify(S.config || {}));
+    zip.file("RESUMEN.txt", resumen.join("\r\n")+"\r\n");
+    S.respaldoMsg = "Comprimiendo…"; render();
+    var blob = await zip.generateAsync({type:"blob", compression:"DEFLATE", compressionOptions:{level:6}});
+    var guardado = await guardarArchivoRespaldo(blob, "cuadre_respaldo_"+hoy+".zip");
+    if(guardado){
+      try{ localStorage.setItem(LS_RESPALDO, String(Date.now())); }catch(e2){}
+      S.respaldoMsg = "Respaldo guardado ("+(blob.size/1048576).toFixed(1)+" MB). "+resumen.length+" empresa(s).";
+    } else S.respaldoMsg = "Respaldo cancelado: no se guardó ningún archivo.";
+  }catch(err){ S.respaldoMsg = "No se pudo hacer el respaldo: "+err.message; }
+  S.respaldoBusy = false; render();
+}
+function respaldoHTML(){
+  var t = 0; try{ t = parseInt(localStorage.getItem(LS_RESPALDO)||"0", 10); }catch(e){}
+  var dias = t ? Math.floor((Date.now()-t)/86400000) : null;
+  var viejo = dias===null || dias>=7;
+  var estado = dias===null ? "Aún no has hecho ningún respaldo en archivo."
+    : (dias===0 ? "Último respaldo: hoy." : "Último respaldo: hace "+dias+" día(s).");
+  return '<div class="small" style="margin-top:6px;'+(viejo?'color:var(--danger,#c0392b);font-weight:600':'')+'">'+esc(estado)+'</div>' +
+    '<div class="small" style="margin-top:2px"><a onclick="app.respaldoCompleto()">'+(S.respaldoBusy?"Haciendo respaldo…":"Guardar respaldo en un archivo")+'</a></div>' +
+    (S.respaldoMsg ? '<div class="small" style="margin-top:2px">'+esc(S.respaldoMsg)+'</div>' : '');
+}
 function estadoConexionHTML(){
   var st = CuadreOffline.estado();
   var txt, cls;
@@ -423,6 +496,7 @@ function estadoConexionHTML(){
   if(st.error) html += '<div class="small" style="margin-top:4px;color:var(--danger,#c0392b)">'+esc(st.error)+'</div>';
   if(st.online) html += '<div class="small" style="margin-top:4px"><a onclick="app.guardarCopia()">'+(S.copiaBusy?"Guardando copia…":"Guardar copia para trabajar sin conexión")+'</a></div>';
   if(S.copiaMsg) html += '<div class="small" style="margin-top:4px">'+esc(S.copiaMsg)+'</div>';
+  html += respaldoHTML();
   return html + '</div>';
 }
 function boot(){
@@ -3699,6 +3773,7 @@ window.app = {
   },
   sincronizarAhora: function(){ CuadreOffline.sincronizar(); },
   guardarCopia: descargarParaSinConexion,
+  respaldoCompleto: respaldoCompleto,
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
