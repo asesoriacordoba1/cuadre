@@ -3552,6 +3552,7 @@ function compararImportRows(a,b,key){
   }
   if(key==="tercero") return (a.tercNombre||"").localeCompare(b.tercNombre||"");
   if(key==="doc") return extractDocRefFromDescripcion(a.descripcion).localeCompare(extractDocRefFromDescripcion(b.descripcion), undefined, {numeric:true});
+  if(key==="descripcion") return (a.descripcion||"").localeCompare(b.descripcion||"");
   if(key==="total") return (Number(a.total)||0)-(Number(b.total)||0);
   return 0;
 }
@@ -3839,6 +3840,7 @@ function importarHTML(e){
         '<td>'+fmtDate(r.fecha)+'</td>' +
         '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
         '<td style="white-space:nowrap">'+esc(extractDocRefFromDescripcion(r.descripcion))+'</td>' +
+        '<td>'+esc(r.descripcion)+'</td>' +
         '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+'</td>' +
         '<td class="num">'+fmtCOP(r.total)+'</td>' +
         '<td>'+flags+'</td>' +
@@ -3846,7 +3848,7 @@ function importarHTML(e){
     }).join("");
     body += '<div class="toolbar" style="margin-top:18px"><div class="small">'+incluidos+' de '+S.importRows.length+' documento(s) seleccionados de "'+esc(S.importFileName)+'"</div>' +
       '<button class="btn btn-sm" onclick="app.confirmImport()" '+(incluidos&&!S.importBusy?"":"disabled")+'>'+(S.importBusy?"Importando… no cierres ni pulses de nuevo":"Importar seleccionados")+'</button></div>' +
-      '<div class="card table-wrap"><table class="data"><thead><tr><th></th>'+importThHTML('Fecha','fecha')+importThHTML('Tipo','tipo')+importThHTML('N° documento','doc')+importThHTML('Tercero','tercero')+importThHTML('Total','total','num')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      '<div class="card table-wrap"><table class="data"><thead><tr><th></th>'+importThHTML('Fecha','fecha')+importThHTML('Tipo','tipo')+importThHTML('N° documento','doc')+importThHTML('Descripción','descripcion')+importThHTML('Tercero','tercero')+importThHTML('Total','total','num')+'<th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
       '<p class="small" style="margin-top:10px">Las compras quedan con una cuenta de gasto genérica (5195) por defecto — revísalas y reclasifícalas desde la pestaña Comprobantes después de importar. Las notas crédito de compra se contabilizan por defecto como devolución de mercancía (según lo que traiga el archivo). La DIAN no indica si una nota crédito es descuento condicionado, devolución sin factura, o afecta la retención de una factura — revísalas una por una y marca la que corresponda con los enlaces junto al tercero.</p>';
   }
 
