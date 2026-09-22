@@ -3623,6 +3623,101 @@ async function dianTraerNotas(urlDado){
   S.dianMsg = archivos.length+" XML descargados de la DIAN"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+". Ya se aplicaron a las notas: mira el resumen en el cuadro «Notas crédito» y las marcas en cada fila.";
   render();
 }
+function dianRevisionCardHTML(){
+  var ocupado = S.dianRevBusy ? "disabled" : "";
+  var body = '<div class="card card-pad" style="margin-top:16px">' +
+    '<div class="section-title">Revisar notas crédito de compra ya guardadas</div>' +
+    '<p class="small" style="margin-bottom:10px">Usa el mismo enlace de arriba: Cuadre vuelve a pedirle a la DIAN el XML de las notas crédito de compra que ya están guardadas como "Nota Crédito" (devolución) en el rango de fechas que elijas, y avisa cuáles dice el XML que en realidad son un descuento condicionado. No cambia nada sola — te muestra la lista para que confirmes cuáles corregir.</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+    '<label class="small">Desde <input type="date" id="dian-rev-desde" '+ocupado+'></label>' +
+    '<label class="small">Hasta <input type="date" id="dian-rev-hasta" '+ocupado+'></label>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.dianRevisarGuardadas()" '+ocupado+'>'+(S.dianRevBusy?"Revisando…":"Revisar guardadas")+'</button>' +
+    '</div>' +
+    (S.dianRevMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianRevMsg)+'</div>' : '');
+  if(S.dianRevResultados && S.dianRevResultados.length){
+    var marcados = S.dianRevResultados.filter(function(x){return x.aplicar;}).length;
+    body += '<table class="table" style="margin-top:10px"><thead><tr><th></th><th>Comprobante</th><th>Tercero</th><th>Total</th><th>Concepto en el XML</th></tr></thead><tbody>';
+    S.dianRevResultados.forEach(function(x, i){
+      body += '<tr><td><input type="checkbox" '+(x.aplicar?'checked':'')+' onchange="app.toggleRevisionNC('+i+',this.checked)"></td>' +
+        '<td>'+esc(x.comp.numero)+'</td><td>'+esc(x.tercNombre)+'</td><td>'+fmtCOP(x.comp.total_debito)+'</td>' +
+        '<td>'+esc(x.n.concepto||"")+(x.n.codigo?(" (código "+esc(x.n.codigo)+")"):"")+(x.n.detalle?(" · "+esc(x.n.detalle)):"")+'</td></tr>';
+    });
+    body += '</tbody></table>' +
+      '<button class="btn btn-sm" style="margin-top:10px" '+(marcados?"":"disabled")+' onclick="app.dianAplicarRevisionNC()">Aplicar '+marcados+' cambio(s) a Descuento Condicionado</button>';
+  }
+  body += '</div>';
+  return body;
+}
+// Vuelve a bajar de la DIAN el XML de las notas crédito de compra ya guardadas (como devolución)
+// en el rango de fechas dado, para avisar cuáles el texto del XML dice que son un descuento condicionado.
+async function dianRevisarGuardadas(){
+  var url = ((document.getElementById("dian-enlace")||{}).value || "").trim();
+  if(!url){ alert("Pega primero el enlace de acceso de la DIAN (arriba, en «Traer el listado directo desde la DIAN»)."); return; }
+  var desde = ((document.getElementById("dian-rev-desde")||{}).value || "").trim();
+  var hasta = ((document.getElementById("dian-rev-hasta")||{}).value || "").trim();
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para esto."); return; }
+  var candidatos = S.comprobantes.filter(function(c){
+    return c.tipo==="FC" && c.cufe && /^Nota Crédito - /.test(c.descripcion||"") &&
+      (!desde || c.fecha>=desde) && (!hasta || c.fecha<=hasta);
+  });
+  if(!candidatos.length){ S.dianRevMsg = "No hay notas crédito de compra guardadas como devolución en ese rango (o ya se revisaron)."; S.dianRevResultados = null; render(); return; }
+  S.dianRevBusy = true; S.dianRevResultados = null;
+  S.dianRevMsg = "Pidiendo a la DIAN el XML de "+candidatos.length+" nota(s) crédito ya guardadas…"; render();
+  var porCufe = {};
+  candidatos.forEach(function(c){ porCufe[String(c.cufe).trim().toLowerCase()] = c; });
+  var cudes = Object.keys(porCufe);
+  var xmls = [], fallidos = 0, errorMsg = "";
+  try{
+    for(var i=0;i<cudes.length;i+=40){
+      S.dianRevMsg = "Descargando XML ("+Math.min(i+40, cudes.length)+" de "+cudes.length+")…"; render();
+      var r = await sb.real.functions.invoke("dian-notas", {body:{url:url, cudes:cudes.slice(i, i+40)}});
+      if(r.error){ errorMsg = await mensajeDeErrorFuncion(r.error); break; }
+      (r.data.resultados||[]).forEach(function(x){ xmls.push(x); });
+      fallidos += r.data.fallidos||0;
+    }
+  }catch(err){ errorMsg = (err && err.message) || String(err); }
+  S.dianRevBusy = false;
+  if(!xmls.length){ S.dianRevMsg = "La DIAN no entregó ningún XML"+(errorMsg?(": "+errorMsg):"")+"."; render(); return; }
+  var cambios = [];
+  xmls.forEach(function(x){
+    var comp = porCufe[String(x.cude).trim().toLowerCase()];
+    if(!comp) return;
+    var n = parseNotaCreditoXml(x.xml);
+    if(!n || !n.esDescuento) return;
+    var tercNombre = extractTercFromDescripcion(comp.descripcion) || "";
+    var docRef = extractDocRefFromDescripcion(comp.descripcion) || "";
+    var total = comp.total_debito;
+    cambios.push({
+      comp: comp, n: n, tercNombre: tercNombre, aplicar: true,
+      nuevaDescripcion: "Descuento Condicionado - "+tercNombre+(docRef?(" ("+docRef+")"):""),
+      nuevasLineas: [
+        {cuenta:"421330", tercero:"", detalle:"Descuento comercial condicionado - "+tercNombre, debito:0, credito:total},
+        {cuenta:"220501", tercero:"", detalle:"Proveedor "+tercNombre+" - descuento condicionado", debito:total, credito:0}
+      ]
+    });
+  });
+  S.dianRevResultados = cambios;
+  S.dianRevMsg = candidatos.length+" nota(s) revisada(s)"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+(errorMsg?(" · se detuvo: "+errorMsg):"")+". "+
+    (cambios.length ? cambios.length+" el XML dice que son descuento condicionado (marcadas abajo para corregir)." : "Ninguna parece mal clasificada: el XML confirma que son devolución o anulación.");
+  render();
+}
+async function dianAplicarRevisionNC(){
+  var elegidos = (S.dianRevResultados||[]).filter(function(x){ return x.aplicar; });
+  if(!elegidos.length) return;
+  if(!confirm("¿Cambiar "+elegidos.length+" nota(s) crédito de devolución a Descuento Condicionado? Se actualiza la descripción y las líneas contables de cada una; los totales no cambian.")) return;
+  var ok = 0, fallos = [];
+  for(var i=0;i<elegidos.length;i++){
+    var x = elegidos[i];
+    var res = await sb.from("comprobantes").update({descripcion:x.nuevaDescripcion, lineas:x.nuevasLineas}).eq("empresa_id", S.empresaId).eq("numero", x.comp.numero);
+    if(res.error){ fallos.push(x.comp.numero+": "+res.error.message); continue; }
+    x.comp.descripcion = x.nuevaDescripcion;
+    x.comp.lineas = x.nuevasLineas;
+    ok++;
+  }
+  S.dianRevResultados = (S.dianRevResultados||[]).filter(function(x){ return !x.aplicar; });
+  S.dianRevMsg = ok+" nota(s) corregida(s) a Descuento Condicionado."+(fallos.length?(" No se pudieron corregir: "+fallos.join("; ")+"."):"");
+  render();
+}
 async function dianTraerListado(){
   var url = ((document.getElementById("dian-enlace")||{}).value || "").trim();
   var desde = ((document.getElementById("dian-desde")||{}).value || "").trim(), hasta = ((document.getElementById("dian-hasta")||{}).value || "").trim();   // AAAA-MM-DD
@@ -3682,6 +3777,7 @@ function importarHTML(e){
   '</div>';
 
   body += dianConectarCardHTML();
+  body += dianRevisionCardHTML();
   if(S.importRows && S.importRows.length){
     var incluidos = S.importRows.filter(function(r){return r.include;}).length;
     var indicesOrden = S.importRows.map(function(r,i){return i;});
@@ -4259,6 +4355,9 @@ window.app = {
   dianProbar: dianProbar,
   dianTraerListado: dianTraerListado,
   dianTraerNotas: function(){ dianTraerNotas(); },
+  dianRevisarGuardadas: dianRevisarGuardadas,
+  dianAplicarRevisionNC: dianAplicarRevisionNC,
+  toggleRevisionNC: function(i, val){ if(S.dianRevResultados && S.dianRevResultados[i]){ S.dianRevResultados[i].aplicar = val; render(); } },
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
