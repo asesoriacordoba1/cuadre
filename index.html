@@ -920,11 +920,13 @@ async function loadEmpresas(){
   if(res.error){ console.error(res.error); return; }
   S.empresas = res.data || [];
   guardarCopiaLocal("empresas", null, S.empresas);
-  if(!S.empresaId && S.empresas.length){ selectEmpresa(S.empresas[0].id); }
-  else if(S.empresaId && !S.empresas.some(function(e){return e.id===S.empresaId;})){
-    S.empresaId = S.empresas.length?S.empresas[0].id:null;
-    if(S.empresaId) selectEmpresa(S.empresaId); else { teardownEmpresa(); render(); }
-  } else render();
+  // No se elige ninguna empresa sola al entrar: el usuario tiene que escogerla
+  // cada vez, para no arriesgarse a trabajar sin darse cuenta en la que quedó
+  // abierta de la última vez. Si la que estaba activa ya no existe, se limpia.
+  if(S.empresaId && !S.empresas.some(function(e){return e.id===S.empresaId;})){
+    S.empresaId = null; teardownEmpresa();
+  }
+  render();
 }
 function subscribeEmpresasRealtime(){
   var ch = sb.channel("empresas-rt").on("postgres_changes",{event:"*",schema:"public",table:"empresas"},function(){ loadEmpresas(); }).subscribe();
@@ -2607,7 +2609,8 @@ function navItem(key, icon, label){
 
 function sidebarHTML(){
   var e = currentEmpresa();
-  var opts = S.empresas.map(function(x){ return '<option value="'+x.id+'"'+(x.id===S.empresaId?" selected":"")+'>'+esc(x.nombre)+'</option>'; }).join("");
+  var opts = (S.empresas.length?'<option value="" '+(S.empresaId?"":"selected")+' disabled>— Elige una empresa —</option>':"") +
+    S.empresas.map(function(x){ return '<option value="'+x.id+'"'+(x.id===S.empresaId?" selected":"")+'>'+esc(x.nombre)+'</option>'; }).join("");
   var meta = e ? ('<div class="empresa-meta">NIT '+esc(e.nit||"—")+'<br>'+esc(e.sector||"")+'</div><span class="pill pill-niif">Grupo NIIF '+e.grupo_niif+'</span>') : "";
   return '' +
   '<div class="sidebar">' +
@@ -2637,6 +2640,14 @@ function mainHTML(){
   if(!S.empresas.length){
     return '<div class="main"><div class="empty card" style="margin-top:12vh"><h3>Crea tu primera empresa</h3><p>Cada empresa tiene su propio plan de cuentas, terceros y comprobantes.</p>' +
       '<div class="btn-row" style="justify-content:center"><button class="btn" onclick="app.openNuevaEmpresa()">Crear empresa</button><button class="btn btn-outline" onclick="app.crearDemo()">Cargar empresa de ejemplo</button></div></div></div>';
+  }
+  if(!S.empresaId){
+    var lista = S.empresas.map(function(x){
+      return '<button class="btn-outline" style="display:block;width:100%;text-align:left;margin-bottom:8px" onclick="app.pickEmpresa(\''+x.id+'\')">'+esc(x.nombre)+' <span class="small">— NIT '+esc(x.nit||"—")+'</span></button>';
+    }).join("");
+    return '<div class="main"><div class="empty card" style="margin-top:8vh;max-width:520px"><h3>Elige la empresa con la que vas a trabajar</h3>' +
+      '<p class="small" style="margin-bottom:14px">Cuadre no deja ninguna empresa abierta por su cuenta: elige una cada vez que entres, para no arriesgarte a trabajar sin darte cuenta en la que quedó activa la última vez.</p>' +
+      lista + '</div></div>';
   }
   var e = currentEmpresa();
   if(!e) return '<div class="main"><div class="loading"><div class="spin"></div>Cargando empresa…</div></div>';
