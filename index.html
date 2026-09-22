@@ -2069,13 +2069,26 @@ function parseNotaCreditoXml(text){
     var af = notaTxt.match(/afecta\s+factura\s+([A-Za-z0-9\-]+)/i);
     if(af) ref = af[1];
   }
+  var codigoConcepto = dr ? xmlTag(dr[1], "ResponseCode") : "";
+  var conceptoXml = dr ? xmlEnt(xmlTag(dr[1], "Description")) : "";
+  var detalleItems = [], mi, reItem = /<(?:\w+:)?Item>\s*<(?:\w+:)?Description>([^<]*)</g;
+  while((mi = reItem.exec(text)) && detalleItems.length<8) detalleItems.push(xmlEnt(mi[1]).trim());
+  // Un descuento se reconoce por el código del concepto (3 rebaja o descuento, 5 pronto pago, 6 por volumen)
+  // o por lo que dice el texto de la nota (concepto, producto o notas), salvo devolución (1) o anulación (2).
+  var textoLibre = (conceptoXml+" "+detalleItems.join(" ")+" "+notaTxt).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  var esDescuento = false;
+  if(codigoConcepto!=="1" && codigoConcepto!=="2"){
+    esDescuento = ["3","5","6"].indexOf(codigoConcepto)>=0 || /descuento|pronto\s*pago|pago\s*anticipado|rebaja|bonificacion/.test(textoLibre);
+  }
   return {
     id: xmlEnt(xmlTag(body, "ID")),
     cude: xmlTag(body, "UUID"),
     ref: ref,
     refIgnorada: refIgnorada,
-    codigo: dr ? xmlTag(dr[1], "ResponseCode") : "",
+    codigo: codigoConcepto,
     concepto: concepto,
+    detalle: detalleItems.filter(Boolean).slice(0,3).join("; "),
+    esDescuento: esDescuento,
     tipoOp: xmlTag(text, "CustomizationID")
   };
 }
@@ -2146,7 +2159,7 @@ async function cargarXmlNotasCredito(files){
       if(r.dup) return;
       var info = [];
       var hecho = false;
-      if(/descuento\s+condicionado/i.test(n.concepto)){
+      if(n.esDescuento){
         app.marcarDescuentoCondicionado(idx, true); stats.desc++; hecho = true;
         info.push(n.ref ? "XML: afecta la factura "+n.ref : "XML: nota sin factura referenciada");
       } else if(n.ref){
@@ -2163,11 +2176,11 @@ async function cargarXmlNotasCredito(files){
         }
       }
       if(!hecho){
-        if(/descuento/i.test(n.concepto)){ app.marcarDescuentoCondicionado(idx, true); stats.desc++; hecho = true; }
-        else if(n.codigo==="1" || n.codigo==="2" || (!n.ref && !n.codigo)){ app.marcarDevolucionSinRetencion(idx, true); stats.dev++; hecho = true; }
+        if(n.codigo==="1" || n.codigo==="2" || (!n.ref && !n.codigo)){ app.marcarDevolucionSinRetencion(idx, true); stats.dev++; hecho = true; }
         else stats.manual++;
       }
-      if(n.concepto) info.push("concepto: "+n.concepto);
+      if(n.concepto) info.push("concepto: "+n.concepto+(n.codigo?" (código "+n.codigo+")":""));
+      if(n.detalle && n.esDescuento) info.push("detalle: "+n.detalle);
       r.xmlInfo = info.join(" · ");
     });
     var partes = [notas.length+" nota(s) crédito leída(s) del XML."];
