@@ -935,6 +935,14 @@ function teardownEmpresa(){
   S.empresaChannels.forEach(function(ch){ sb.removeChannel(ch); });
   S.empresaChannels=[];
   S.cuentas=[]; S.terceros=[]; S.comprobantes=[]; S.periodosDocs={};
+  // Una vista previa de importación (o de revisión de notas crédito) quedaba
+  // abierta al cambiar de empresa en el selector, y al confirmar se guardaba
+  // con el NIT de la empresa que quedó activa -- no la que se subió el listado.
+  // Se borra todo lo pendiente de importar al cambiar de empresa para evitar mezclarlas.
+  S.importRows=null; S.importFileName=""; S.importErr=""; S.importSortKey=null; S.importSortDir=1;
+  S.cleanupGroups=null; S.docSoporteCandidatos=null;
+  S.dianRevResultados=null; S.dianRevMsg=""; S.dianMsg=""; S.dianDiag=""; S.dianResultado=""; S.xmlResumen="";
+  S.tercImportRows=null; S.tercImportFileName=""; S.tercImportErr="";
 }
 
 async function selectEmpresa(id){
@@ -2272,6 +2280,8 @@ async function confirmImport(){
       invalidas.slice(0,15).map(function(r){return "- "+r.tercNombre+" ("+r.fecha+")";}).join("\n")+(invalidas.length>15?"\n...":""));
     return;
   }
+  var empresaImp = currentEmpresa();
+  if(!confirm("¿Importar "+rows.length+" documento(s) a "+(empresaImp?empresaImp.nombre+" (NIT "+(empresaImp.nit||"sin NIT")+")":"la empresa activa")+"? Revisa que sea la empresa correcta en el selector de la izquierda antes de continuar.")) return;
   S.importBusy=true; render();
 
   var nuevosMap = {};
@@ -3705,7 +3715,8 @@ async function dianRevisarGuardadas(){
 async function dianAplicarRevisionNC(){
   var elegidos = (S.dianRevResultados||[]).filter(function(x){ return x.aplicar; });
   if(!elegidos.length) return;
-  if(!confirm("¿Cambiar "+elegidos.length+" nota(s) crédito de devolución a Descuento Condicionado? Se actualiza la descripción y las líneas contables de cada una; los totales no cambian.")) return;
+  var empresaRev = currentEmpresa();
+  if(!confirm("¿Cambiar "+elegidos.length+" nota(s) crédito de devolución a Descuento Condicionado en "+(empresaRev?empresaRev.nombre:"la empresa activa")+"? Se actualiza la descripción y las líneas contables de cada una; los totales no cambian.")) return;
   var ok = 0, fallos = [];
   for(var i=0;i<elegidos.length;i++){
     var x = elegidos[i];
