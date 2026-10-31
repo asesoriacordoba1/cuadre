@@ -1757,7 +1757,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     var baseGravada5 = con5 ? Math.round(xmlImp.b5) : 0;
     if(con5){
       var exenta5 = total - iva - baseGravada - baseGravada5;
-      return {gravada:baseGravada, gravada5:baseGravada5, exenta:(Math.abs(exenta5)<5 ? 0 : exenta5)};
+      return {gravada:baseGravada, gravada5:baseGravada5, exenta:(Math.abs(exenta5)<5 ? 0 : Math.round(exenta5*100)/100)};
     }
     var baseExenta = total - iva - baseGravada;
     if(total>0){
@@ -3768,6 +3768,19 @@ async function esperarVistaPrevia(){
     await new Promise(function(r){ setTimeout(r, 300); });
   }
 }
+// La DIAN exige un captcha (Cloudflare Turnstile) para bajar el XML de cada documento. Cuadre no lo resuelve ni lo evade:
+// el XML se baja a mano desde el portal de la DIAN y se sube en el cuadro de «Leer el XML…».
+var MSG_CAPTCHA_DIAN = "La DIAN ahora pide una verificación anti-robot (captcha) para descargar cada XML, y Cuadre no puede saltársela. Descarga el XML desde el portal de la DIAN (botón de XML de cada documento, ahí resuelves el captcha tú) y súbelo en el cuadro «Leer el XML de notas crédito y facturas» más abajo, suelto o en ZIP.";
+function diagPideCaptcha(diag){ return (diag||[]).some(function(d){ return /captcha/i.test(JSON.stringify(d)); }); }
+// Factura con IVA donde el 19% no explica toda la base: puede tener parte al 5% (o exenta/excluida). Solo el XML lo aclara.
+function posibleIva5(r){
+  if(r.esNC || r.dup || r.xmlImp || r.xmlInfo || !r.include || !(Number(r.iva)>0) || !(r.esVenta || !r.esPersonal)) return false;
+  return (Number(r.total)||0) - r.iva - Math.round(r.iva/19*100) >= 5;
+}
+function pistaPosibles5(){
+  var n = (S.importRows||[]).filter(posibleIva5).length;
+  return n ? " En la vista previa marqué con «¿IVA 5%?» las "+n+" factura(s) que lo pueden tener: esas son las que conviene subir." : "";
+}
 // Baja de la DIAN el XML de cada nota crédito de compra de la vista previa y los aplica con el lector de XML.
 async function dianTraerNotas(urlDado){
   var url = (typeof urlDado==="string" && urlDado) ? urlDado : ((document.getElementById("dian-enlace")||{}).value || "").trim();
@@ -3786,10 +3799,12 @@ async function dianTraerNotas(urlDado){
       (r.data.resultados||[]).forEach(function(x){ archivos.push(new File([x.xml], x.cude+".xml", {type:"text/xml"})); });
       fallidos += r.data.fallidos||0;
       if(r.data.diagnostico && r.data.diagnostico.length) diag = diag.concat(r.data.diagnostico);
+      if(!archivos.length && diagPideCaptcha(diag)) break;   // si la DIAN pide captcha no tiene caso seguir pidiendo
     }
   }catch(err){ errorMsg = (err && err.message) || String(err); }
   S.dianBusy = false;
   if(errorMsg && !archivos.length){ S.dianMsg = "No se pudieron bajar los XML: "+errorMsg; render(); return; }
+  if(!archivos.length && diagPideCaptcha(diag)){ S.dianMsg = MSG_CAPTCHA_DIAN; render(); return; }
   if(!archivos.length){
     S.dianMsg = "La DIAN no entregó ningún XML de las "+cudes.length+" notas. Revisa el detalle técnico de abajo.";
     S.dianDiag = JSON.stringify(diag, null, 2); render(); return;
@@ -3818,9 +3833,14 @@ async function dianTraerFacturas(urlDado){
       (r.data.resultados||[]).forEach(function(x){ xmls.push({cude:x.cude, xml:x.xml}); });
       fallidos += r.data.fallidos||0;
       if(r.data.diagnostico && r.data.diagnostico.length) diag = diag.concat(r.data.diagnostico);
+      if(!xmls.length && diagPideCaptcha(diag)) break;   // si la DIAN pide captcha no tiene caso seguir pidiendo
     }
   }catch(err){ errorMsg = (err && err.message) || String(err); }
   S.dianBusy = false;
+  if(!xmls.length && diagPideCaptcha(diag)){
+    S.dianMsg = MSG_CAPTCHA_DIAN+pistaPosibles5();
+    render(); return;
+  }
   if(!xmls.length){
     S.dianMsg = "No se pudieron bajar los XML de las facturas"+(errorMsg?(": "+errorMsg):". La DIAN no entregó ninguno; revisa el detalle técnico de abajo.");
     if(!errorMsg) S.dianDiag = JSON.stringify(diag, null, 2);
@@ -3955,7 +3975,10 @@ async function dianTraerListado(){
     handleImportFile(archivo);
     if(conNotas || conFacturas) await esperarVistaPrevia();
     if(conNotas) await dianTraerNotas(url);
-    if(conFacturas){ var msgNotas = S.dianMsg; await dianTraerFacturas(url); if(conNotas && S.dianMsg) S.dianMsg = msgNotas+" "+S.dianMsg; render(); }
+    if(conFacturas){
+      if(conNotas && S.dianMsg===MSG_CAPTCHA_DIAN){ S.dianMsg += pistaPosibles5(); render(); }   // ya se sabe que la DIAN pide captcha
+      else { var msgNotas = S.dianMsg; await dianTraerFacturas(url); if(conNotas && S.dianMsg) S.dianMsg = msgNotas+" "+S.dianMsg; render(); }
+    }
   }catch(err){ S.dianMsg = "No se pudo traer el listado: "+(err && err.message || err); S.dianBusy = false; render(); }
 }
 async function dianProbar(){
@@ -3999,7 +4022,7 @@ function importarHTML(e){
       });
     }
     body += '<div class="card card-pad" style="margin-top:18px"><div class="section-title">Leer el XML de notas crédito y facturas (opcional)</div>' +
-      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto, y tampoco la tarifa del IVA de cada factura. Descarga el <b>XML</b> desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. En las notas crédito, Cuadre vincula la factura y marca el tipo; en las facturas (compra y venta), separa el IVA al 19% del 5%.</p>' +
+      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto, y tampoco la tarifa del IVA de cada factura. Descarga el <b>XML</b> desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. En las notas crédito, Cuadre vincula la factura y marca el tipo; en las facturas (compra y venta), separa el IVA al 19% del 5%. Como la DIAN pide captcha para bajar cada XML, este es el camino que funciona: baja desde su portal solo los de las facturas marcadas «¿IVA 5%?».</p>' +
       '<input type="file" accept=".xml,.zip" multiple onchange="app.cargarXmlNC(this.files)">' +
       (S.xmlBusy? '<div class="loading"><div class="spin"></div>Leyendo XML…</div>' : "") +
       (S.xmlResumen? '<div class="small" style="margin-top:10px">'+esc(S.xmlResumen)+'</div>' : "") +
@@ -4051,7 +4074,7 @@ function importarHTML(e){
         '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
         '<td style="white-space:nowrap">'+esc(extractDocRefFromDescripcion(r.descripcion))+'</td>' +
         '<td>'+esc(r.descripcion)+'</td>' +
-        '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+((!r.esNC && r.xmlInfo) ? '<br><span class="small" style="color:var(--good,#2a7)">'+esc(r.xmlInfo)+'</span>' : '')+'</td>' +
+        '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+((!r.esNC && r.xmlInfo) ? '<br><span class="small" style="color:var(--good,#2a7)">'+esc(r.xmlInfo)+'</span>' : '')+(posibleIva5(r) ? '<br><span class="small" style="color:var(--warn,#b60)">¿IVA 5%? Sube su XML para separarlo</span>' : '')+'</td>' +
         '<td class="num">'+fmtCOP(r.total)+'</td>' +
         '<td>'+flags+'</td>' +
       '</tr>';
