@@ -3861,10 +3861,12 @@ function dianConectarCardHTML(){
     '<p class="small" style="margin-bottom:10px">Pega el enlace de acceso que te envía la DIAN al correo (el que empieza por <b>catalogo-vpfe.dian.gov.co/User/AuthToken</b>), elige el mes y Cuadre pide el listado a la DIAN, lo descarga y lo abre en la vista previa de abajo, igual que si hubieras subido el Excel. <b>Todavía no guarda nada</b>: tú revisas y confirmas. El enlace de la DIAN vale 60 minutos: puedes usar el mismo para traer varios meses seguidos. Cuadre no lo guarda.</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="dian-enlace" style="flex:1;min-width:280px" placeholder="https://catalogo-vpfe.dian.gov.co/User/AuthToken?pk=...&rk=...&token=..." '+ocupado+'>' +
     '<label class="small">Desde <input type="date" id="dian-desde" '+ocupado+'></label><label class="small">Hasta <input type="date" id="dian-hasta" '+ocupado+'></label>' +
-    '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
+    '<button class="btn btn-sm" onclick="app.dianTraerSoloXml()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer con XML (recomendado)")+'</button>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>Traer listado</button></div>' +
+    '<p class="small" style="margin-top:8px"><b>Traer con XML</b>: Cuadre usa la lista de la DIAN solo para saber qué documentos hay (los que ya están guardados no se vuelven a pedir), baja el XML de cada uno y arma los comprobantes únicamente con los XML (IVA al 19% y al 5%, retenciones). <b>Traer listado</b> usa los montos del Excel de la DIAN, que no trae tarifas ni retenciones.</p>' +
     '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-notas" checked '+ocupado+'> Traer también los XML de las notas crédito y aplicarlos</label>' +
     '<button class="btn btn-outline btn-sm" onclick="app.dianTraerNotas()" '+ocupado+'>Solo traer XML de notas crédito</button></div>' +
-    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-facturas" '+ocupado+'> Traer también el XML de las facturas con IVA (compras y ventas) para separar IVA 19% y 5%</label>' +
+    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-facturas" checked '+ocupado+'> Traer también el XML de las facturas con IVA (compras y ventas) para separar IVA 19% y 5%</label>' +
     '<button class="btn btn-outline btn-sm" onclick="app.dianTraerFacturas()" '+ocupado+'>Solo traer XML de facturas</button></div>' +
     (S.dianMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianMsg)+'</div>' : '') +
     (S.dianDiag ? '<div class="small" style="margin-top:8px">Detalle técnico (cópialo y envíaselo a Claude si hace falta):</div><textarea readonly style="width:100%;height:160px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianDiag)+'</textarea>' : '') +
@@ -3890,7 +3892,7 @@ async function esperarVistaPrevia(){
 }
 // La DIAN exige un captcha (Cloudflare Turnstile) para bajar el XML de cada documento. Cuadre no lo resuelve ni lo evade:
 // el XML se baja a mano desde el portal de la DIAN y se sube en el cuadro de «Leer el XML…».
-var MSG_CAPTCHA_DIAN = "La DIAN ya no deja descargar los XML de forma automática: pide una verificación anti-robot (captcha) por documento y, sin ella, responde «documento no encontrado». Cuadre no puede saltarse esa verificación. Descarga el XML desde el portal de la DIAN (ahí resuelves el captcha tú) y súbelo en «Importar directo desde los XML» o en el cuadro «Leer el XML de notas crédito y facturas» más abajo, suelto o en ZIP.";
+var MSG_CAPTCHA_DIAN = "La DIAN no entregó los XML: el portal principal pide una verificación anti-robot (captcha) por documento y el Facturador Gratuito tampoco respondió con este enlace. Cuadre no puede saltarse el captcha. Pide un enlace nuevo (dura 60 minutos) o descarga el XML desde el portal de la DIAN (ahí resuelves el captcha tú) y súbelo en «Importar directo desde los XML» o en el cuadro «Leer el XML de notas crédito y facturas» más abajo, suelto o en ZIP.";
 function diagPideCaptcha(diag){ return (diag||[]).some(function(d){ return /captcha|no encontrado en los registros/i.test(JSON.stringify(d)); }); }
 // Factura con IVA donde el 19% no explica toda la base: puede tener parte al 5% (o exenta/excluida). Solo el XML lo aclara.
 function posibleIva5(r){
@@ -4101,6 +4103,69 @@ async function dianTraerListado(){
     }
   }catch(err){ S.dianMsg = "No se pudo traer el listado: "+(err && err.message || err); S.dianBusy = false; render(); }
 }
+// Importar con la URL de la DIAN usando SOLO los XML: el listado únicamente sirve para saber qué documentos existen (su código CUFE);
+// los montos, el IVA por tarifa y las retenciones salen del XML de cada documento, que se baja del portal del Facturador Gratuito.
+async function dianTraerSoloXml(){
+  var url = ((document.getElementById("dian-enlace")||{}).value || "").trim();
+  var desde = ((document.getElementById("dian-desde")||{}).value || "").trim(), hasta = ((document.getElementById("dian-hasta")||{}).value || "").trim();
+  if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
+  if(!desde || !hasta){ alert("Elige las fechas Desde y Hasta."); return; }
+  if(desde > hasta){ alert("La fecha Desde no puede ser posterior a la fecha Hasta."); return; }
+  if((Date.parse(hasta) - Date.parse(desde)) / 86400000 > 92){ alert("El rango es muy largo. Pide como máximo 3 meses por vez."); return; }
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para traer los documentos."); return; }
+  var empresa = currentEmpresa();
+  if(!empresa){ alert("Elige primero la empresa."); return; }
+  var rangoTxt = fechaDMY(desde)+" a "+fechaDMY(hasta);
+  S.dianBusy = true; S.dianDiag = ""; S.importRows = null; S.importErr = "";
+  S.dianMsg = "Pidiendo a la DIAN la lista de documentos del "+rangoTxt+" (solo para saber cuáles hay). Puede tardar hasta 2 minutos, no cierres esta ventana…"; render();
+  try{
+    var r = await sb.real.functions.invoke("dian-listado", {body:{url:url, desde:desde, hasta:hasta, grupo:"0"}});
+    if(r.error){ S.dianMsg = "No se pudo traer la lista: "+(await mensajeDeErrorFuncion(r.error)); S.dianBusy = false; render(); return; }
+    if(!(r.data instanceof Blob)){ S.dianMsg = "La respuesta de la DIAN no fue un archivo válido."; S.dianBusy = false; render(); return; }
+    var zip = await JSZip.loadAsync(r.data);
+    var excels = Object.keys(zip.files).filter(function(n){ return /\.xlsx?$/i.test(n) && !zip.files[n].dir; });
+    if(!excels.length){ S.dianMsg = "El archivo de la DIAN no trae ningún Excel."; S.dianBusy = false; render(); return; }
+    var wb = XLSX.read(new Uint8Array(await zip.files[excels[0]].async("arraybuffer")), {type:"array", cellDates:true});
+    var hoja = wb.SheetNames.find(function(n){ return /^Rp_Doc/i.test(n); }) || wb.SheetNames[0];
+    var filas = XLSX.utils.sheet_to_json(wb.Sheets[hoja], {defval:""});
+    var guardados = {}; S.comprobantes.forEach(function(c){ if(c.cufe) guardados[String(c.cufe).trim().toLowerCase()] = 1; });
+    var vistos = {}, cudes = [], deEmpresa = 0, yaGuardados = 0;
+    filas.forEach(function(row){
+      var estado = String(row["Estado"]||"").toLowerCase();
+      if(estado.indexOf("rechaz")>=0 || estado.indexOf("anulad")>=0) return;
+      if(!nitMatches(row["NIT Emisor"], empresa.nit) && !nitMatches(row["NIT Receptor"], empresa.nit)) return;
+      var cufe = String(row["CUFE/CUDE"]||"").trim().toLowerCase();
+      if(!/^[0-9a-f]{40,128}$/.test(cufe) || vistos[cufe]) return;
+      vistos[cufe] = 1; deEmpresa++;
+      if(guardados[cufe]){ yaGuardados++; return; }
+      cudes.push(cufe);
+    });
+    if(!cudes.length){
+      S.dianMsg = deEmpresa ? "Los "+deEmpresa+" documento(s) de "+empresa.nombre+" en ese rango ya están guardados en Cuadre." : "No encontré documentos de "+empresa.nombre+" (NIT "+(empresa.nit||"sin NIT")+") en ese rango. Revisa que el enlace sea de la cuenta de la DIAN de esta empresa.";
+      S.dianBusy = false; render(); return;
+    }
+    var archivos = [], fallidos = 0, diag = [], errorMsg = "";
+    for(var i=0;i<cudes.length;i+=40){
+      S.dianMsg = "Descargando el XML de cada documento ("+Math.min(i+40, cudes.length)+" de "+cudes.length+")… no cierres esta ventana."; render();
+      var rb = await sb.real.functions.invoke("dian-notas", {body:{url:url, cudes:cudes.slice(i, i+40)}});
+      if(rb.error){ errorMsg = await mensajeDeErrorFuncion(rb.error); break; }
+      (rb.data.resultados||[]).forEach(function(x){ archivos.push(new File([x.xml], x.cude+".xml", {type:"text/xml"})); });
+      fallidos += rb.data.fallidos||0;
+      if(rb.data.diagnostico && rb.data.diagnostico.length) diag = diag.concat(rb.data.diagnostico);
+      if(!archivos.length && i===0){ break; }   // el primer lote no entregó nada: no tiene caso seguir
+    }
+    S.dianBusy = false;
+    if(!archivos.length){
+      if(diagPideCaptcha(diag)){ S.dianMsg = MSG_CAPTCHA_DIAN; }
+      else { S.dianMsg = "La DIAN no entregó ningún XML"+(errorMsg?(": "+errorMsg):". Revisa el detalle técnico de abajo."); if(!errorMsg) S.dianDiag = JSON.stringify(diag, null, 2); }
+      render(); return;
+    }
+    S.dianMsg = archivos.length+" XML descargados de "+cudes.length+(yaGuardados?(" (otros "+yaGuardados+" ya estaban guardados)"):"")+(fallidos?(" · "+fallidos+" no se pudieron bajar"):"")+(errorMsg?(" · se detuvo: "+errorMsg):"")+". Armando los comprobantes desde los XML…"; render();
+    await importarDesdeXml(archivos);
+    S.dianMsg = archivos.length+" XML descargados de la DIAN"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+(errorMsg?(" · se detuvo: "+errorMsg):"")+". Revisa la vista previa de abajo antes de importar.";
+    render();
+  }catch(err){ S.dianMsg = "No se pudo traer desde la DIAN: "+(err && err.message || err); S.dianBusy = false; render(); }
+}
 async function dianProbar(){
   var el = document.getElementById("dian-enlace");
   var url = (el && el.value || "").trim();
@@ -4124,7 +4189,7 @@ async function dianProbar(){
 function importarHTML(e){
   var body = '<div class="card card-pad" style="margin-bottom:16px">' +
     '<div class="section-title">Importar directo desde los XML (recomendado)</div>' +
-    '<p class="small" style="margin-bottom:12px">Sube los XML de las facturas y de las notas crédito de <b>'+esc(e.nombre)+'</b> (sueltos o en un ZIP). Cuadre arma los comprobantes leyendo cada XML — total, IVA al 19% y al 5%, retenciones, fecha y partes — <b>sin usar el listado de la DIAN</b>, que no discrimina los IVA ni las retenciones. Abajo ves la vista previa y confirmas antes de guardar. Los XML salen del portal de la DIAN (cada descarga pide su captcha, que resuelves tú), del correo donde llegan las facturas o de tu programa de facturación.</p>' +
+    '<p class="small" style="margin-bottom:12px">Sube los XML de las facturas y de las notas crédito de <b>'+esc(e.nombre)+'</b> (sueltos o en un ZIP). Cuadre arma los comprobantes leyendo cada XML — total, IVA al 19% y al 5%, retenciones, fecha y partes — <b>sin usar el listado de la DIAN</b>, que no discrimina los IVA ni las retenciones. Abajo ves la vista previa y confirmas antes de guardar. También puedes traerlos directo de la DIAN con su enlace de acceso (botón «Traer con XML», más abajo), o subirlos a mano si los tienes del correo, del portal o de tu programa de facturación.</p>' +
     '<input type="file" accept=".xml,.zip" multiple '+(S.importBusy?"disabled ":"")+'onchange="app.importarDesdeXml(this.files)">' +
   '</div>' +
   '<div class="card card-pad">' +
@@ -4147,7 +4212,7 @@ function importarHTML(e){
       });
     }
     body += '<div class="card card-pad" style="margin-top:18px"><div class="section-title">Leer el XML de notas crédito y facturas (opcional)</div>' +
-      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto, y tampoco la tarifa del IVA de cada factura. Descarga el <b>XML</b> desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. En las notas crédito, Cuadre vincula la factura y marca el tipo; en las facturas (compra y venta), separa el IVA al 19% del 5%. Como la DIAN pide captcha para bajar cada XML, este es el camino que funciona: baja desde su portal solo los de las facturas marcadas «¿IVA 5%?».</p>' +
+      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto, y tampoco la tarifa del IVA de cada factura. Descarga el <b>XML</b> desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. En las notas crédito, Cuadre vincula la factura y marca el tipo; en las facturas (compra y venta), separa el IVA al 19% del 5%. Si traes el listado, Cuadre puede pedirle a la DIAN estos XML por ti con la casilla de arriba; también puedes subirlos a mano.</p>' +
       '<input type="file" accept=".xml,.zip" multiple onchange="app.cargarXmlNC(this.files)">' +
       (S.xmlBusy? '<div class="loading"><div class="spin"></div>Leyendo XML…</div>' : "") +
       (S.xmlResumen? '<div class="small" style="margin-top:10px">'+esc(S.xmlResumen)+'</div>' : "") +
@@ -4720,6 +4785,7 @@ window.app = {
   dianTraerListado: dianTraerListado,
   dianTraerNotas: function(){ dianTraerNotas(); },
   dianTraerFacturas: function(){ dianTraerFacturas(); },
+  dianTraerSoloXml: function(){ dianTraerSoloXml(); },
   dianRevisarGuardadas: dianRevisarGuardadas,
   dianAplicarRevisionNC: dianAplicarRevisionNC,
   toggleRevisionNC: function(i, val){ if(S.dianRevResultados && S.dianRevResultados[i]){ S.dianRevResultados[i].aplicar = val; render(); } },
