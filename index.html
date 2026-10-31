@@ -3890,8 +3890,8 @@ async function esperarVistaPrevia(){
 }
 // La DIAN exige un captcha (Cloudflare Turnstile) para bajar el XML de cada documento. Cuadre no lo resuelve ni lo evade:
 // el XML se baja a mano desde el portal de la DIAN y se sube en el cuadro de «Leer el XML…».
-var MSG_CAPTCHA_DIAN = "La DIAN ahora pide una verificación anti-robot (captcha) para descargar cada XML, y Cuadre no puede saltársela. Descarga el XML desde el portal de la DIAN (botón de XML de cada documento, ahí resuelves el captcha tú) y súbelo en el cuadro «Leer el XML de notas crédito y facturas» más abajo, suelto o en ZIP.";
-function diagPideCaptcha(diag){ return (diag||[]).some(function(d){ return /captcha/i.test(JSON.stringify(d)); }); }
+var MSG_CAPTCHA_DIAN = "La DIAN ya no deja descargar los XML de forma automática: pide una verificación anti-robot (captcha) por documento y, sin ella, responde «documento no encontrado». Cuadre no puede saltarse esa verificación. Descarga el XML desde el portal de la DIAN (ahí resuelves el captcha tú) y súbelo en «Importar directo desde los XML» o en el cuadro «Leer el XML de notas crédito y facturas» más abajo, suelto o en ZIP.";
+function diagPideCaptcha(diag){ return (diag||[]).some(function(d){ return /captcha|no encontrado en los registros/i.test(JSON.stringify(d)); }); }
 // Factura con IVA donde el 19% no explica toda la base: puede tener parte al 5% (o exenta/excluida). Solo el XML lo aclara.
 function posibleIva5(r){
   if(r.esNC || r.dup || r.xmlImp || r.xmlInfo || !r.include || !(Number(r.iva)>0) || !(r.esVenta || !r.esPersonal)) return false;
