@@ -361,7 +361,18 @@ function bimestreDePeriodo(per){
   var year=per.slice(0,4), month=parseInt(per.slice(5,7),10);
   var idx=Math.ceil(month/2)-1; if(idx<0) idx=0; if(idx>5) idx=5;
   var m1=idx*2+1, m2=idx*2+2;
-  return {codigo:BIMESTRES[idx][0], label:BIMESTRES[idx][1]+" "+year, periodos:[year+"-"+String(m1).padStart(2,"0"), year+"-"+String(m2).padStart(2,"0")]};
+  return {codigo:BIMESTRES[idx][0], label:BIMESTRES[idx][1]+" "+year, periodos:[year+"-"+String(m1).padStart(2,"0"), year+"-"+String(m2).padStart(2,"0")], tipo:"bimestral"};
+}
+var CUATRIMESTRES=[["01","Enero-Abril"],["02","Mayo-Agosto"],["03","Septiembre-Diciembre"]];
+function cuatrimestreDePeriodo(per){
+  var year=per.slice(0,4), month=parseInt(per.slice(5,7),10);
+  var idx=Math.ceil(month/4)-1; if(idx<0) idx=0; if(idx>2) idx=2;
+  var periodos=[]; for(var m=idx*4+1; m<=idx*4+4; m++) periodos.push(year+"-"+String(m).padStart(2,"0"));
+  return {codigo:CUATRIMESTRES[idx][0], label:CUATRIMESTRES[idx][1]+" "+year, periodos:periodos, tipo:"cuatrimestral"};
+}
+function periodoIvaDe(per){
+  var emp = S.empresas.find(function(x){ return x.id===S.empresaId; });
+  return (emp && emp.periodicidad_iva==="cuatrimestral") ? cuatrimestreDePeriodo(per) : bimestreDePeriodo(per);
 }
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function debounce(fn, ms){
@@ -637,11 +648,11 @@ function hoja350Mes(per, empresaNombre){
 function hoja300Bimestre(per, empresaNombre){
   formulario300HTML(per);   // deja el cálculo en S._res300
   var r = S._res300; if(!r) return null;
-  var bim = r.bim, m1 = mesDePer(bim.periodos[0]), m2 = mesDePer(bim.periodos[1]);
+  var bim = r.bim, m1 = mesDePer(bim.periodos[0]), m2 = mesDePer(bim.periodos[bim.periodos.length-1]);
   var n = function(v){ return Math.round(Number(v)||0); };
   var aoa = [
     [empresaNombre.toUpperCase()+" - IVA (FORMULARIO 300)"],
-    [mesTitulo(bim.periodos[0])+"-"+mesTitulo(bim.periodos[1])+" "+m2.anio+" · Declaración del Impuesto sobre las Ventas - IVA (bimestral) · Periodo DIAN "+bim.codigo],
+    [mesTitulo(bim.periodos[0])+"-"+mesTitulo(bim.periodos[bim.periodos.length-1])+" "+m2.anio+" · Declaración del Impuesto sobre las Ventas - IVA ("+bim.tipo+") · Periodo DIAN "+bim.codigo],
     [], ["INGRESOS (VENTAS)"], ["Concepto","Casilla","Valor"],
     ["Por operaciones gravadas a la tarifa general",28,n(r.c28)],
     ["Por operaciones exentas/excluidas",35,n(r.c35)],
@@ -720,11 +731,11 @@ function libroCoworkDeEmpresa(e, datos){
   });
   var vistos = {};
   periodos.slice().reverse().forEach(function(per){
-    var bim = bimestreDePeriodo(per);
+    var bim = periodoIvaDe(per);
     if(vistos[bim.codigo+bim.label]) return;
     vistos[bim.codigo+bim.label] = 1;
     var h = hoja300Bimestre(per, emp.nombre);
-    if(h){ var a = mesDePer(bim.periodos[0]), b = mesDePer(bim.periodos[1]); XLSX.utils.book_append_sheet(wb, h, ("IVA FORM 300 "+a.abr+"-"+b.abr+" "+b.anio).slice(0,31)); }
+    if(h){ var a = mesDePer(bim.periodos[0]), b = mesDePer(bim.periodos[bim.periodos.length-1]); XLSX.utils.book_append_sheet(wb, h, ("IVA FORM 300 "+a.abr+"-"+b.abr+" "+b.anio).slice(0,31)); }
   });
   // El detalle linea por linea no va en el Excel (pesa mucho): la copia completa para restaurar es el respaldo tecnico (.zip).
   var nLineasTotal = comps.reduce(function(a, c){ return a + (c.lineas||[]).length; }, 0);
@@ -1056,7 +1067,7 @@ function agruparPorMayor(items, campos){
 async function guardarEdicionEmpresa(id, d){
   var cambios = {nombre:d.nombre, nit:d.nit, sector:d.sector, grupo_niif:d.grupo_niif, responsabilidades:d.responsabilidades,
     direccion:d.direccion, ciudad:d.ciudad, departamento:d.departamento, correo:d.correo, telefono:d.telefono,
-    ciiu:d.ciiu, representante_nombre:d.representante_nombre, representante_tipo_doc:d.representante_tipo_doc, representante_identificacion:d.representante_identificacion};
+    ciiu:d.ciiu, representante_nombre:d.representante_nombre, representante_tipo_doc:d.representante_tipo_doc, representante_identificacion:d.representante_identificacion, periodicidad_iva:d.periodicidad_iva};
   var res = await sb.from("empresas").update(cambios).eq("id", id);
   if(res.error){ alert("No se pudo guardar: "+res.error.message); return; }
   var e = S.empresas.find(function(x){ return x.id===id; });
@@ -1068,7 +1079,7 @@ async function crearEmpresa(nombre, nit, sector, grupo, extra){
   extra = extra || {};
   var ins = await sb.from("empresas").insert({nombre:nombre, nit:nit, sector:sector, grupo_niif:grupo, creada:todayISO(), demo:false,
     responsabilidades:extra.responsabilidades||[], direccion:extra.direccion||"", ciudad:extra.ciudad||"", departamento:extra.departamento||"", correo:extra.correo||"", telefono:extra.telefono||"",
-    ciiu:extra.ciiu||"", representante_nombre:extra.representante_nombre||"", representante_tipo_doc:extra.representante_tipo_doc||"13", representante_identificacion:extra.representante_identificacion||""}).select().single();
+    ciiu:extra.ciiu||"", representante_nombre:extra.representante_nombre||"", representante_tipo_doc:extra.representante_tipo_doc||"13", representante_identificacion:extra.representante_identificacion||"", periodicidad_iva:extra.periodicidad_iva||"bimestral"}).select().single();
   if(ins.error){ alert("No se pudo crear la empresa: "+ins.error.message); return; }
   var id = ins.data.id;
   var rows = PUC.map(function(row){ return {empresa_id:id, codigo:row[0], nombre:row[1], tipo:row[2], nivel:row[3], naturaleza:naturaleza(row[2],!!row[4]), postable:esPostable(row[0])}; });
@@ -2679,32 +2690,61 @@ function topbarHTML(){
   return '<div class="topbar"><div><h1>'+t[0]+'</h1><div class="sub">'+t[1]+'</div></div>'+sel+'</div>';
 }
 
+function resumenIvaPeriodo(bim){
+  var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
+  var vN={main:0,iva:0}, vD={main:0,iva:0}, cN={main:0,iva:0}, cD={main:0,iva:0};
+  list.forEach(function(c){
+    var desc = c.descripcion||"";
+    if(/^Descuento Condicionado/.test(desc)) return;
+    var esDevol = /^Nota Crédito/.test(desc);
+    var esPersonal = /\[(personal|diverso)\]/.test(desc);
+    var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
+    if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)){
+      var s = ivaMainDe(c), b = esDevol?vD:vN;
+      b.main+=s.main; b.iva+=s.iva;
+    } else if((c.tipo==="FC" || c.tipo==="CE") && !esPersonal){
+      var s2 = ivaMainDe(c), b2 = esDevol?cD:cN;
+      b2.main+=s2.main; b2.iva+=s2.iva;
+    }
+  });
+  var fila = function(a){ var g=gravadaExentaDe(a); return {noGrav:g.exenta, grav:g.gravada, iva:a.iva, total:g.exenta+g.gravada+a.iva}; };
+  var neto = function(a,b){ return {noGrav:a.noGrav-b.noGrav, grav:a.grav-b.grav, iva:a.iva-b.iva, total:a.total-b.total}; };
+  var vn=fila(vN), vd=fila(vD), cn=fila(cN), cd=fila(cD);
+  var vt=neto(vn,vd), ct=neto(cn,cd);
+  return {vn:vn, vd:vd, vt:vt, cn:cn, cd:cd, ct:ct, saldo: vt.iva-ct.iva, nDocs:list.length};
+}
+function ivaPanelHTML(bim, r){
+  var cel = function(x){ return '<td class="num">'+fmtCOP(x)+'</td>'; };
+  var guion = '<td class="num">-</td>';
+  var fila = function(lbl, x, cls){ return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lbl+'</td>'+cel(x.noGrav)+cel(x.grav)+cel(x.iva)+guion+guion+cel(x.total)+'</tr>'; };
+  var pagar = r.saldo>0 ? r.saldo : 0, favor = r.saldo<0 ? -r.saldo : 0;
+  var filaFinal = function(lbl, v){ return '<tr class="total-row"><td colspan="3">'+lbl+'</td>'+cel(v)+'<td colspan="3"></td></tr>'; };
+  var vacio = r.nDocs===0 ? '<p class="small" style="margin-top:10px">No hay comprobantes en este periodo de IVA todavía.</p>' : "";
+  return '<div class="card card-pad" style="margin-bottom:18px">' +
+    '<div class="section-title">IVA del periodo · '+esc(bim.label)+' <span class="chip chip-warn" style="margin-left:6px">'+esc(bim.tipo)+'</span></div>' +
+    '<p class="small" style="margin-bottom:10px">Comprobantes de '+bim.periodos.map(periodoLabel).join(", ")+'. Cambia el mes en el selector de arriba a la derecha para ver otro periodo. <a class="link" onclick="app.setTab(\'formularios\')">Ir al Formulario 300 →</a></p>' +
+    '<div class="table-wrap"><table class="data"><thead><tr><th></th><th class="num">Venta no gravada</th><th class="num">Venta gravada 19%</th><th class="num">Total IVA 19%</th><th class="num">Venta gravada 5%</th><th class="num">Total IVA 5%</th><th class="num">Total</th></tr></thead><tbody>' +
+      '<tr class="hdr-row"><td colspan="7">Ventas</td></tr>' +
+      fila('Venta actual', r.vn) + fila('Devoluciones', r.vd) + fila('Total ventas', r.vt, 'total-row') +
+      '<tr class="hdr-row"><td colspan="7">Compras</td></tr>' +
+      fila('Compras', r.cn) + fila('Devoluciones', r.cd) + fila('Total compras', r.ct, 'total-row') +
+      '<tr class="hdr-row"><td colspan="7">Liquidación (IVA generado − IVA descontable)</td></tr>' +
+      filaFinal('Total a pagar', pagar) + filaFinal('Saldo a favor', favor) +
+    '</tbody></table></div>' + vacio +
+    '<p class="small" style="margin-top:10px">Las compras cuentan solo mercancía (las marcadas como Diverso no se descuentan). Cuadre todavía no separa las operaciones al 5%, por eso esas columnas salen en guion.</p>' +
+  '</div>';
+}
 function dashboardHTML(e){
   var per = S.periodo || todayPeriodo();
-  var util = utilidadAcumulada(per);
-  var sums = computeSaldos(per);
-  var activos=0,pasivos=0,patrimonioBase=0;
-  S.cuentas.forEach(function(c){
-    if(!esPostable(c.codigo)) return;
-    var n=saldoNeto(c.codigo,sums);
-    if(c.tipo==="activo") activos+=n;
-    else if(c.tipo==="pasivo") pasivos+=n;
-    else if(c.tipo==="patrimonio") patrimonioBase+=n;
-  });
-  var patrimonio = patrimonioBase+util.utilidad;
+  var bimIva = periodoIvaDe(per);
+  var iva = resumenIvaPeriodo(bimIva);
   var voucherPeriodo = S.comprobantes.filter(function(c){return c.periodo===per;});
   var td=0,tc=0;
   voucherPeriodo.forEach(function(v){ td+=v.total_debito||0; tc+=v.total_credito||0; });
   var cuadra = Math.abs(td-tc)<1;
   var cerrado = periodoCerrado(per);
 
-  var kpis = [
-    ["Total activos", fmtCOP(activos), "al cierre de "+periodoLabel(per)],
-    ["Total pasivos", fmtCOP(pasivos), ""],
-    ["Patrimonio", fmtCOP(patrimonio), "incluye utilidad acumulada"],
-    ["Utilidad del ejercicio", fmtCOP(util.utilidad), "acumulado del año a "+periodoLabel(per)]
-  ];
-  var kpiHTML = kpis.map(function(k){return '<div class="card kpi"><div class="lbl">'+k[0]+'</div><div class="val">'+k[1]+'</div><div class="foot">'+k[2]+'</div></div>';}).join("");
+  var ivaHTML = ivaPanelHTML(bimIva, iva);
 
   var recientes = S.comprobantes.slice().sort(function(a,b){return (b._id||"").localeCompare(a._id||"");}).slice(0,6);
   var recRows = recientes.map(function(c){
@@ -2712,7 +2752,7 @@ function dashboardHTML(e){
   }).join("") || '<tr><td colspan="4" class="small" style="padding:16px 10px">Aún no hay comprobantes en esta empresa.</td></tr>';
 
   return topbarHTML() +
-  '<div class="kpi-grid">'+kpiHTML+'</div>' +
+  ivaHTML +
   '<div class="grid-2">' +
     '<div class="card card-pad">' +
       '<div class="section-title">Comprobantes recientes</div>' +
@@ -3125,7 +3165,7 @@ function gravadaExentaDe(agg){
   return {gravada:gravada, exenta:exenta};
 }
 function formulario300HTML(per){
-  var bim = bimestreDePeriodo(per);
+  var bim = periodoIvaDe(per);
   var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
 
   var vN={main:0,iva:0}, vD={main:0,iva:0};
@@ -3199,7 +3239,7 @@ function formulario300HTML(per){
 
   var html = '<div class="card card-pad">' +
     '<div class="section-title">Declaración IVA — Formulario 300 · '+esc(bim.label)+'</div>' +
-    '<p class="small">Bimestral · Periodo DIAN '+bim.codigo+' · Calculado a partir de los comprobantes de '+periodoLabel(bim.periodos[0])+' y '+periodoLabel(bim.periodos[1])+'.</p>' +
+    '<p class="small">'+cap(bim.tipo)+' · Periodo DIAN '+bim.codigo+' · Calculado a partir de los comprobantes de '+bim.periodos.map(periodoLabel).join(", ")+'.</p>' +
     avisoResponsabilidadHTML("iva","Responsable de IVA") +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">INGRESOS (VENTAS)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
@@ -3949,6 +3989,10 @@ function empresaModal(e){
         return '<label style="display:flex;gap:8px;align-items:center;font-weight:400;margin:4px 0"><input type="checkbox" id="f-resp-'+r[0]+'" '+(resp.indexOf(r[0])>=0?"checked":"")+'> '+esc(r[1])+' <span class="small">'+esc(r[2])+'</span></label>';
       }).join("") +
       '<div class="small" style="margin-top:4px">Con esto Cuadre sabe si la empresa declara IVA (300) y retención (350), y avisa en los formularios si no aplican.</div></div>' +
+    '<div class="field"><label>Periodicidad de la declaración de IVA</label><select id="f-periodicidad-iva">' +
+      '<option value="bimestral"'+(e.periodicidad_iva!=="cuatrimestral"?" selected":"")+'>Bimestral (6 al año)</option>' +
+      '<option value="cuatrimestral"'+(e.periodicidad_iva==="cuatrimestral"?" selected":"")+'>Cuatrimestral (3 al año)</option>' +
+    '</select><div class="small" style="margin-top:4px">Define el periodo que muestra el Panel y que usa el Formulario 300.</div></div>' +
     '<div class="field"><label>Actividad económica principal (CIIU)</label><input id="f-ciiu" value="'+v(e.ciiu)+'" placeholder="Ej. 4711 — Comercio al por menor en establecimientos no especializados"></div>' +
     '<div class="field"><label>Representante legal</label><input id="f-rep-nombre" value="'+v(e.representante_nombre)+'" placeholder="Nombre completo"></div>' +
     '<div class="field-row">' +
@@ -3977,7 +4021,7 @@ function datosEmpresaDelFormulario(){
     nombre:g("f-nombre"), nit:g("f-nit"), sector:g("f-sector"), grupo_niif:pendingNiif,
     responsabilidades: RESPONSABILIDADES_EMPRESA.filter(function(r){ var c=document.getElementById("f-resp-"+r[0]); return c && c.checked; }).map(function(r){return r[0];}),
     direccion:g("f-direccion"), ciudad:g("f-ciudad"), departamento:g("f-departamento"), correo:g("f-correo"), telefono:g("f-telefono"),
-    ciiu:g("f-ciiu"), representante_nombre:g("f-rep-nombre"), representante_tipo_doc:g("f-rep-tipodoc"), representante_identificacion:g("f-rep-id")
+    ciiu:g("f-ciiu"), representante_nombre:g("f-rep-nombre"), representante_tipo_doc:g("f-rep-tipodoc"), representante_identificacion:g("f-rep-id"), periodicidad_iva:g("f-periodicidad-iva")||"bimestral"
   };
 }
 // Avisos según lo declarado en el RUT (solo si la empresa ya tiene responsabilidades registradas).
