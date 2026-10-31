@@ -1696,6 +1696,10 @@ function baseMinimaCompras(fecha, config){
 var CUENTAS_IVA5 = {"413502":1, "417502":1, "143502":1, "240803":1, "240804":1};
 // xmlImp (opcional): impuestos leídos del XML de la factura ({b19,i19,b5,i5}); permite separar 19% y 5%.
 function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas, xmlImp){
+  // Fila armada desde el XML (importar sin listado): ya trae el IVA por tarifa.
+  if(!xmlImp && row.__imp && row.__imp.i5>0 && !row.__imp.otras.length){
+    xmlImp = {b19:Math.round(row.__imp.b19), i19:Math.round(row.__imp.i19), b5:Math.round(row.__imp.b5), i5:Math.round(row.__imp.i5)};
+  }
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
   var esND = !esNC && /d[eé]bito/i.test(tipoDocRaw);
@@ -2166,29 +2170,90 @@ async function extraerXmlsDeArchivos(files){
 // Lee de la factura electrónica (Invoice, suelta o dentro del AttachedDocument de la DIAN) la base y el IVA por tarifa.
 // Solo se miran los impuestos del total del documento (se descartan los de cada línea) y solo el IVA (esquema 01).
 function parseImpuestosXml(text){
-  var inv = null;
+  var d = parseDocumentoXml(text);
+  if(!d || d.raiz!=="Invoice") return null;
+  return {b19:Math.round(d.imp.b19), i19:Math.round(d.imp.i19), b5:Math.round(d.imp.b5), i5:Math.round(d.imp.i5), otras:d.imp.otras, cude:d.cude};
+}
+// Lee un documento electrónico completo (factura, nota crédito o nota débito; suelto o dentro del AttachedDocument de la DIAN):
+// partes, fecha, total, IVA por tarifa y retenciones. Solo cuentan los impuestos del total del documento (no los de cada línea).
+function parseDocumentoXml(text){
+  var cand = [text];
   if(/<(?:\w+:)?AttachedDocument[\s>]/.test(text)){
+    cand = [];
     var reCd = /<!\[CDATA\[([\s\S]*?)\]\]>/g, mc;
-    while((mc = reCd.exec(text))){ if(/<(?:\w+:)?Invoice[\s>]/.test(mc[1])){ inv = mc[1]; break; } }
-  } else if(/<(?:\w+:)?Invoice[\s>]/.test(text)) inv = text;
-  if(!inv) return null;
-  var doc = inv.replace(/<(?:\w+:)?InvoiceLine[\s>][\s\S]*?<\/(?:\w+:)?InvoiceLine>/g, "");
-  var r = {b19:0, i19:0, b5:0, i5:0, otras:[], cude:xmlTag(doc, "UUID").toLowerCase()};
-  var reTt = /<(?:\w+:)?TaxTotal[\s>]([\s\S]*?)<\/(?:\w+:)?TaxTotal>/g, mt;
-  while((mt = reTt.exec(doc))){
-    var reSub = /<(?:\w+:)?TaxSubtotal[\s>]([\s\S]*?)<\/(?:\w+:)?TaxSubtotal>/g, ms;
-    while((ms = reSub.exec(mt[1]))){
-      var sub = ms[1];
-      var esq = sub.match(/<(?:\w+:)?TaxScheme[\s>][\s\S]*?<(?:\w+:)?ID[^>]*>([^<]*)</);
-      if(!esq || esq[1].trim()!=="01") continue;
-      var base = parseFloat(xmlTag(sub, "TaxableAmount"))||0, imp = parseFloat(xmlTag(sub, "TaxAmount"))||0, pct = parseFloat(xmlTag(sub, "Percent"))||0;
-      if(Math.abs(pct-19)<0.01){ r.b19 += base; r.i19 += imp; }
-      else if(Math.abs(pct-5)<0.01){ r.b5 += base; r.i5 += imp; }
-      else if(imp>0) r.otras.push(pct);
-    }
+    while((mc = reCd.exec(text))) cand.push(mc[1]);
   }
-  r.b19 = Math.round(r.b19); r.i19 = Math.round(r.i19); r.b5 = Math.round(r.b5); r.i5 = Math.round(r.i5);
-  return r;
+  var doc = null, raiz = "";
+  for(var i=0; i<cand.length && !doc; i++){
+    var mr = cand[i].match(/<(?:\w+:)?(Invoice|CreditNote|DebitNote)[\s>]/);
+    if(mr){ doc = cand[i]; raiz = mr[1]; }
+  }
+  if(!doc) return null;
+  var lineTag = {Invoice:"InvoiceLine", CreditNote:"CreditNoteLine", DebitNote:"DebitNoteLine"}[raiz];
+  var cuerpo = doc.replace(/<(?:\w+:)?UBLExtensions>[\s\S]*?<\/(?:\w+:)?UBLExtensions>/, "")
+    .replace(new RegExp("<(?:\\w+:)?"+lineTag+"[\\s>][\\s\\S]*?<\\/(?:\\w+:)?"+lineTag+">", "g"), "");
+  var imp = {b19:0, i19:0, b5:0, i5:0, otras:[], ivaTotal:0, reteIva:0, reteRenta:0, reteIca:0};
+  var recorrer = function(etiqueta, fn){
+    var reT = new RegExp("<(?:\\w+:)?"+etiqueta+"[\\s>]([\\s\\S]*?)<\\/(?:\\w+:)?"+etiqueta+">", "g"), mt;
+    while((mt = reT.exec(cuerpo))){
+      var reSub = /<(?:\w+:)?TaxSubtotal[\s>]([\s\S]*?)<\/(?:\w+:)?TaxSubtotal>/g, ms;
+      while((ms = reSub.exec(mt[1]))){
+        var sub = ms[1];
+        var esq = sub.match(/<(?:\w+:)?TaxScheme[\s>][\s\S]*?<(?:\w+:)?ID[^>]*>([^<]*)</);
+        fn((esq ? esq[1].trim() : ""), parseFloat(xmlTag(sub, "TaxableAmount"))||0, parseFloat(xmlTag(sub, "TaxAmount"))||0, parseFloat(xmlTag(sub, "Percent"))||0);
+      }
+    }
+  };
+  recorrer("TaxTotal", function(esquema, base, monto, pct){
+    if(esquema!=="01") return;
+    imp.ivaTotal += monto;
+    if(Math.abs(pct-19)<0.01){ imp.b19 += base; imp.i19 += monto; }
+    else if(Math.abs(pct-5)<0.01){ imp.b5 += base; imp.i5 += monto; }
+    else if(monto>0) imp.otras.push(pct);
+  });
+  recorrer("WithholdingTaxTotal", function(esquema, base, monto){
+    if(esquema==="05") imp.reteIva += monto;
+    else if(esquema==="06") imp.reteRenta += monto;
+    else if(esquema==="07") imp.reteIca += monto;
+  });
+  var parte = function(etiqueta){
+    var m = cuerpo.match(new RegExp("<(?:\\w+:)?"+etiqueta+"[\\s>]([\\s\\S]*?)<\\/(?:\\w+:)?"+etiqueta+">"));
+    if(!m) return {nit:"", nombre:""};
+    var nit = (m[1].match(/<(?:\w+:)?CompanyID[^>]*>([^<]*)</) || [])[1] || "";
+    return {nit:nit.trim(), nombre:(xmlEnt(xmlTag(m[1], "RegistrationName")) || xmlEnt(xmlTag(m[1], "Name"))).trim()};
+  };
+  var lmt = cuerpo.match(/<(?:\w+:)?LegalMonetaryTotal[\s>]([\s\S]*?)<\/(?:\w+:)?LegalMonetaryTotal>/);
+  var codigoTipo = xmlTag(cuerpo, "InvoiceTypeCode") || xmlTag(cuerpo, "CreditNoteTypeCode") || xmlTag(cuerpo, "DebitNoteTypeCode");
+  var pago = cuerpo.match(/<(?:\w+:)?PaymentMeans[\s>]([\s\S]*?)<\/(?:\w+:)?PaymentMeans>/);
+  return {
+    raiz: raiz,
+    codigoTipo: codigoTipo,
+    id: xmlEnt(xmlTag(cuerpo, "ID")),
+    cude: xmlTag(cuerpo, "UUID").toLowerCase(),
+    fecha: xmlTag(cuerpo, "IssueDate"),
+    vendedor: parte("AccountingSupplierParty"),
+    comprador: parte("AccountingCustomerParty"),
+    total: lmt ? (parseFloat(xmlTag(lmt[1], "PayableAmount"))||0) : 0,
+    formaPago: pago ? xmlTag(pago[1], "ID") : "",
+    imp: imp
+  };
+}
+// Convierte un documento leído del XML en una fila con las mismas columnas que el listado de la DIAN,
+// para que pase por exactamente el mismo armado de comprobantes (terceros, reglas, retenciones).
+function filaDesdeDocumentoXml(d){
+  var m = d.id.match(/^(.*?\D)?(\d+)$/);
+  var esSoporte = d.raiz==="Invoice" && d.codigoTipo==="05";
+  // En el documento soporte quien lo emite es el adquirente (la propia empresa), que en el XML va como "comprador".
+  var emisor = esSoporte ? d.comprador : d.vendedor, receptor = esSoporte ? d.vendedor : d.comprador;
+  var tipo = d.raiz==="CreditNote" ? "Nota de crédito electrónica" : (d.raiz==="DebitNote" ? "Nota de débito electrónica" : (esSoporte ? "Documento soporte" : "Factura electrónica"));
+  return {
+    "Tipo de documento": tipo, "CUFE/CUDE": d.cude, "Folio": m ? m[2] : d.id, "Prefijo": (m && m[1]) || "", "Divisa": "COP",
+    "Forma de Pago": d.formaPago, "Fecha Emisión": d.fecha,
+    "NIT Emisor": emisor.nit, "Nombre Emisor": emisor.nombre, "NIT Receptor": receptor.nit, "Nombre Receptor": receptor.nombre,
+    "IVA": d.imp.ivaTotal, "Rete IVA": d.imp.reteIva, "Rete Renta": d.imp.reteRenta, "Rete ICA": d.imp.reteIca,
+    "Total": d.total, "Estado": "Aprobado", "Grupo": "",
+    __imp: d.imp
+  };
 }
 // lista: [{cude?, xml}]. Rehace las facturas de la vista previa que traen IVA al 5% para separarlo del 19%.
 function aplicarXmlFacturas(lista){
@@ -2248,11 +2313,11 @@ function aplicarVinculoNC(i, folio){
   r.debeCuadra = Math.abs(tot.d-tot.c)<1;
   return "";
 }
-async function cargarXmlNotasCredito(files){
+async function cargarXmlNotasCredito(files, sinFacturas){
   S.xmlBusy = true; S.xmlResumen = ""; render();
   try{
     var textos = await extraerXmlsDeArchivos(files);
-    var resFacturas = aplicarXmlFacturas(textos.map(function(t){ return {xml:t}; }));   // los XML de facturas (compra o venta) separan 19% y 5%
+    var resFacturas = sinFacturas ? "" : aplicarXmlFacturas(textos.map(function(t){ return {xml:t}; }));   // los XML de facturas (compra o venta) separan 19% y 5%
     var vistos = {}, notas = [];
     textos.forEach(function(t){
       var n = parseNotaCreditoXml(t);
@@ -2353,6 +2418,61 @@ function handleImportFile(file){
   };
   reader.onerror=function(){ S.importErr="No se pudo leer el archivo."; S.importBusy=false; render(); };
   reader.readAsArrayBuffer(file);
+}
+// Importar directo desde los XML (facturas y notas crédito), sin usar el listado de la DIAN: de cada XML salen el total,
+// el IVA por tarifa (19% / 5%) y las retenciones; el resto del armado (terceros, reglas, retenciones) es el mismo de siempre.
+async function importarDesdeXml(files){
+  var empresa = currentEmpresa();
+  if(!empresa){ alert("Elige primero la empresa."); return; }
+  S.importBusy=true; S.importErr=""; S.importRows=null; S.xmlResumen=""; render();
+  var resumen = "";
+  try{
+    var textos = await extraerXmlsDeArchivos(files);
+    var vistos = {}, docs = [], sinCufe = 0;
+    textos.forEach(function(t){
+      var d = parseDocumentoXml(t);
+      if(!d) return;
+      if(!d.cude){ sinCufe++; return; }
+      if(vistos[d.cude]) return;
+      vistos[d.cude] = true; docs.push(d);
+    });
+    var existingCufes = {}; S.comprobantes.forEach(function(c){ if(c.cufe) existingCufes[c.cufe]=true; });
+    var proveedores = S.terceros.filter(function(t){ return t.tipo==="proveedor" && t.identificacion; });
+    var drafts = [], ajenas = 0, sinFecha = 0, notas = 0, con5 = 0, otraTarifa = [];
+    docs.forEach(function(doc){
+      var row = filaDesdeDocumentoXml(doc);
+      var d = buildDraftFromDianRow(row, empresa, proveedores, S.terceros, S.config, S.reglasCuentas);
+      if(!d){ ajenas++; return; }
+      if(d._error==="fecha"){ sinFecha++; return; }
+      d.dup = !!(d.cufe && existingCufes[d.cufe]);
+      d.include = !d.dup && !d.esConocidoPersonal && !d.dsRecibido;
+      if(d.esNC) notas++;
+      if(doc.imp.otras.length){ otraTarifa.push(extractDocRefFromDescripcion(d.descripcion)); d.xmlInfo = "XML: trae IVA con una tarifa distinta de 19% y 5% ("+doc.imp.otras.join(", ")+"%): revísala a mano"; }
+      else if(d.xmlImp){ con5++; d.xmlInfo = "XML: IVA 19% "+fmtCOP(d.xmlImp.i19)+" + IVA 5% "+fmtCOP(d.xmlImp.i5)+(d.lineas.some(function(l){ return CUENTAS_IVA5[l.cuenta]; }) ? " (separado en cuentas del 5%)" : " (gasto o diverso: el IVA va como mayor valor, no se separa)"); }
+      drafts.push(d);
+    });
+    S.importRows = drafts;
+    S.importFileName = docs.length+" XML";
+    var partes = [docs.length+" documento(s) leído(s) directamente de los XML ("+(docs.length-notas-ajenas-sinFecha)+" facturas y "+notas+" notas crédito)."];
+    if(con5) partes.push(con5+" traen IVA al 5%: separé el 19% y el 5%.");
+    if(otraTarifa.length) partes.push(otraTarifa.length+" traen otra tarifa de IVA: "+otraTarifa.slice(0,8).join(", ")+".");
+    var yaGuardadas = drafts.filter(function(d){ return d.dup; }).length;
+    if(yaGuardadas) partes.push(yaGuardadas+" ya estaban importadas (quedan desmarcadas).");
+    if(ajenas) partes.push(ajenas+" XML no son de esta empresa (el NIT no coincide) y se dejaron por fuera.");
+    if(sinFecha) partes.push(sinFecha+" no se pudieron leer por la fecha.");
+    if(sinCufe) partes.push(sinCufe+" XML no traían CUFE y se omitieron.");
+    if(!docs.length) S.importErr = "No encontré facturas ni notas crédito en esos archivos. Sube los XML (o un ZIP con ellos) descargados de la DIAN.";
+    resumen = partes.join(" ");
+    if(docs.length && !drafts.length) S.importErr = resumen;
+  }catch(err){
+    S.importErr = "No se pudo leer el XML: "+err.message;
+  }
+  S.importBusy=false; S.xmlResumen = resumen; render();
+  // Las notas crédito además se vinculan a su factura y se clasifican (devolución, descuento...) con su propio lector.
+  if((S.importRows||[]).some(function(r){ return r.esNC; })){
+    await cargarXmlNotasCredito(files, true);
+    S.xmlResumen = resumen+" "+S.xmlResumen; render();
+  }
 }
 // La DIAN solo entrega NIT y nombre. Con eso se deduce lo demas: un NIT de
 // 9 digitos que empieza por 8 o 9 es una empresa (tipo 31); cualquier otro
@@ -3744,7 +3864,7 @@ function dianConectarCardHTML(){
     '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
     '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-notas" checked '+ocupado+'> Traer también los XML de las notas crédito y aplicarlos</label>' +
     '<button class="btn btn-outline btn-sm" onclick="app.dianTraerNotas()" '+ocupado+'>Solo traer XML de notas crédito</button></div>' +
-    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-facturas" checked '+ocupado+'> Traer también el XML de las facturas con IVA (compras y ventas) para separar IVA 19% y 5%</label>' +
+    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-facturas" '+ocupado+'> Traer también el XML de las facturas con IVA (compras y ventas) para separar IVA 19% y 5%</label>' +
     '<button class="btn btn-outline btn-sm" onclick="app.dianTraerFacturas()" '+ocupado+'>Solo traer XML de facturas</button></div>' +
     (S.dianMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianMsg)+'</div>' : '') +
     (S.dianDiag ? '<div class="small" style="margin-top:8px">Detalle técnico (cópialo y envíaselo a Claude si hace falta):</div><textarea readonly style="width:100%;height:160px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianDiag)+'</textarea>' : '') +
@@ -4002,8 +4122,13 @@ async function dianProbar(){
   S.dianBusy = false; render();
 }
 function importarHTML(e){
-  var body = '<div class="card card-pad">' +
-    '<div class="section-title">1. Sube el reporte de la DIAN</div>' +
+  var body = '<div class="card card-pad" style="margin-bottom:16px">' +
+    '<div class="section-title">Importar directo desde los XML (recomendado)</div>' +
+    '<p class="small" style="margin-bottom:12px">Sube los XML de las facturas y de las notas crédito de <b>'+esc(e.nombre)+'</b> (sueltos o en un ZIP). Cuadre arma los comprobantes leyendo cada XML — total, IVA al 19% y al 5%, retenciones, fecha y partes — <b>sin usar el listado de la DIAN</b>, que no discrimina los IVA ni las retenciones. Abajo ves la vista previa y confirmas antes de guardar. Los XML salen del portal de la DIAN (cada descarga pide su captcha, que resuelves tú), del correo donde llegan las facturas o de tu programa de facturación.</p>' +
+    '<input type="file" accept=".xml,.zip" multiple '+(S.importBusy?"disabled ":"")+'onchange="app.importarDesdeXml(this.files)">' +
+  '</div>' +
+  '<div class="card card-pad">' +
+    '<div class="section-title">Alternativa: sube el listado de la DIAN (Excel)</div>' +
     '<p class="small" style="margin-bottom:12px">Descarga el Excel desde el enlace que te llega al correo de la DIAN (la hoja que empieza con "Rp_Doc") y súbelo aquí. Se compara el NIT de cada documento contra el NIT de <b>'+esc(e.nombre)+'</b> ('+esc(e.nit||"sin NIT registrado")+') para clasificar ventas y compras. Las compras cuyo NIT emisor esté registrado en <a class="link" onclick="app.setTab(\'terceros\')">Terceros</a> con Tipo <b>proveedor</b> se clasifican como compra de mercancía. Las que estén registradas con Tipo <b>personal</b> se marcan de una vez como gasto personal y quedan desmarcadas para que no las importes por accidente. Cualquier otro NIT (no registrado, o registrado como cliente/empleado/otro) se marca como <b>Diverso</b> — no significa que sea personal, solo que falta clasificar — y se importa igual en la cuenta genérica (5195) para que lo revises después en Comprobantes. Al confirmar la importación, los NIT de clientes y proveedores que no existan todavía en Terceros se registran automáticamente ahí: los de ventas como <b>Cliente</b>, los de compras como <b>Otro</b> (Diversos) — revísalos y reclasifícalos si hace falta.</p>' +
     '<input type="file" id="import-file" accept=".xlsx,.xls" '+(S.importBusy?"disabled ":"")+'onchange="app.onImportFile(this.files[0])">' +
     (S.importBusy? '<div class="loading"><div class="spin"></div>'+(S.importProgress?("Guardando "+S.importProgress.done+" de "+S.importProgress.total+"…"):"Procesando…")+'</div>' : "") +
@@ -4601,6 +4726,7 @@ window.app = {
   exportar350: exportar350,
   exportar300: exportar300,
   cargarXmlNC: function(files){ if(files && files.length) cargarXmlNotasCredito(files); },
+  importarDesdeXml: function(files){ if(files && files.length) importarDesdeXml(files); },
   marcarIngresoVenta: function(i, concepto){
     var r = S.importRows && S.importRows[i];
     if(!r || !r.esVenta) return;
