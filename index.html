@@ -654,19 +654,19 @@ function hoja300Bimestre(per, empresaNombre){
     [empresaNombre.toUpperCase()+" - IVA (FORMULARIO 300)"],
     [mesTitulo(bim.periodos[0])+"-"+mesTitulo(bim.periodos[bim.periodos.length-1])+" "+m2.anio+" · Declaración del Impuesto sobre las Ventas - IVA ("+bim.tipo+") · Periodo DIAN "+bim.codigo],
     [], ["INGRESOS (VENTAS)"], ["Concepto","Casilla","Valor"],
-    ["Por operaciones gravadas a la tarifa general",28,n(r.c28)]].concat(r.hay5 ? [["Por operaciones gravadas a la tarifa del 5%","",n(r.v5)]] : []).concat([
+    ["Por operaciones gravadas a la tarifa general",28,n(r.c28)]].concat(r.hay5 ? [["Por operaciones gravadas al 5%",27,n(r.v5)]] : []).concat([
     ["Por operaciones exentas/excluidas",35,n(r.c35)],
     ["Total ingresos brutos",41,n(r.c41)],
     ["Devoluciones en ventas anuladas, rescindidas o resueltas",42,n(r.c42)],
-    ["Total ingresos netos recibidos durante el período",43,n(r.c43)],
+    ["Total ingresos netos recibidos durante el período",43,n(r.c43)]]).concat(r.hay5 ? [["Impuesto generado a la tarifa del 5%",58,n(r.gen5)], ["Impuesto generado a la tarifa general",59,n(r.c67-r.gen5)]] : []).concat([
     ["Total impuesto generado por operaciones gravadas",67,n(r.c67)],
     [], ["COMPRAS"], ["Concepto","Casilla","Valor"],
-    ["De bienes gravados a la tarifa general (nacionales)",51,n(r.c51)]]).concat(r.hay5 ? [["De bienes gravados a la tarifa del 5%","",n(r.comp5)]] : []).concat([
+    ["De bienes gravados a la tarifa general (nacionales)",51,n(r.c51)]]).concat(r.hay5 ? [["De bienes gravados a la tarifa del 5%",50,n(r.comp5)]] : []).concat([
     ["De bienes y servicios excluidos, exentos y no gravados",54,n(r.c54)],
     ["Total compras e importaciones brutas",55,n(r.c55)],
     ["Devoluciones en compras anuladas, rescindidas o resueltas en este período",56,n(r.c56)],
     ["Total compras netas realizadas durante el período",57,n(r.c57)],
-    ["Por compras de bienes gravados a la tarifa general (impuesto descontable)",72,n(r.c72)]]).concat(r.hay5 ? [["Por compras de bienes gravados a la tarifa del 5% (impuesto descontable)","",n(r.desc5)]] : []).concat([
+    ["Por compras de bienes gravados a la tarifa general (impuesto descontable)",72,n(r.c72)]]).concat(r.hay5 ? [["Por compras de bienes gravados a la tarifa del 5% (impuesto descontable)",71,n(r.desc5)]] : []).concat([
     ["Total impuestos descontables",81,n(r.c81)],
     [], ["LIQUIDACIÓN"],
     r.c82>0 ? ["Saldo a pagar del período fiscal",82,n(r.c82)] : ["Saldo a favor del período fiscal",83,n(r.c83)],
@@ -3305,7 +3305,7 @@ function formulario300HTML(per){
   S._det300 = {bim: bim, filas: detalle300};
   var vNs=gravadaExentaDe(vN), vDs=gravadaExentaDe(vD);
   var cNs=gravadaExentaDe(cN), cDs=gravadaExentaDe(cD);
-  // Las filas del 5% no llevan número de casilla: verifícalo en el formulario vigente.
+  // Casillas del 5% según el Formulario 300 vigente: 27 y 50 (bases), 58 (IVA generado) y 71 (IVA descontable).
   var c28=vNs.gravada, c35=vNs.exenta, v5=vNs.gravada5;
   var c41=c28+v5+c35;
   var c42=vDs.gravada+vDs.gravada5+vDs.exenta;
@@ -3352,23 +3352,24 @@ function formulario300HTML(per){
     '<div class="small" style="font-weight:600;margin:16px 0 6px">INGRESOS (VENTAS)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
       filaFormHTML(28,"Por operaciones gravadas a la tarifa general",c28) +
-      (hay5 ? filaFormHTML("—","Por operaciones gravadas a la tarifa del 5%",v5) : "") +
+      (hay5 ? filaFormHTML(27,"Por operaciones gravadas al 5%",v5) : "") +
       filaFormHTML(35,"Por operaciones exentas/excluidas",c35) +
       filaFormHTML(41,"Total ingresos brutos",c41) +
       filaFormHTML(42,"Devoluciones en ventas anuladas, rescindidas o resueltas",c42) +
       filaFormHTML(43,"Total ingresos netos recibidos durante el período",c43) +
-      filaFormHTML(67,"Total impuesto generado por operaciones gravadas"+(hay5?" (incluye "+fmtCOP(gen5)+" al 5%)":""),c67) +
+      (hay5 ? filaFormHTML(58,"Impuesto generado a la tarifa del 5%",gen5) + filaFormHTML(59,"Impuesto generado a la tarifa general",c67-gen5) : "") +
+      filaFormHTML(67,"Total impuesto generado por operaciones gravadas",c67) +
     '</tbody></table></div>' +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">COMPRAS (mercancía — excluye compras marcadas como Diverso, sin clasificar)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
       filaFormHTML(51,"De bienes gravados a la tarifa general (nacionales)",c51) +
-      (hay5 ? filaFormHTML("—","De bienes gravados a la tarifa del 5%",comp5) : "") +
+      (hay5 ? filaFormHTML(50,"De bienes gravados a la tarifa del 5%",comp5) : "") +
       filaFormHTML(54,"De bienes y servicios excluidos, exentos y no gravados",c54) +
       filaFormHTML(55,"Total compras e importaciones brutas",c55) +
       filaFormHTML(56,"Devoluciones en compras anuladas, rescindidas o resueltas en este período",c56) +
       filaFormHTML(57,"Total compras netas realizadas durante el período",c57) +
       filaFormHTML(72,"Por compras de bienes gravados a la tarifa general (impuesto descontable)",c72) +
-      (hay5 ? filaFormHTML("—","Por compras de bienes gravados a la tarifa del 5% (impuesto descontable)",desc5) : "") +
+      (hay5 ? filaFormHTML(71,"Por compras de bienes gravados a la tarifa del 5% (impuesto descontable)",desc5) : "") +
       filaFormHTML(81,"Total impuestos descontables",c81) +
     '</tbody></table></div>' +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">LIQUIDACIÓN</div>' +
@@ -3380,7 +3381,7 @@ function formulario300HTML(per){
       meses.map(function(m){return '<tr><td>'+esc(periodoLabel(m.periodo))+'</td><td>'+esc(m.label)+'</td></tr>';}).join("") +
     '</tbody></table></div>' +
     detalle300HTML(detalle300) +
-    '<p class="small" style="margin-top:14px">'+(hay5 ? 'Las filas del 5% no traen número de casilla: ubícalas en el formulario vigente al presentar. ' : 'Las operaciones al 5% aparecen cuando las facturas se importan leyendo su XML. ')+'No incluye importaciones, exportaciones, retenciones de IVA ni saldos a favor de periodos anteriores — agrégalos manualmente al presentar si aplican para este cliente.</p>' +
+    '<p class="small" style="margin-top:14px">'+(hay5 ? '' : 'Las operaciones al 5% (casillas 27, 50, 58 y 71) aparecen cuando las facturas se importan leyendo su XML. ')+'No incluye importaciones, exportaciones, retenciones de IVA ni saldos a favor de periodos anteriores — agrégalos manualmente al presentar si aplican para este cliente.</p>' +
   '</div>';
   return html;
 }
