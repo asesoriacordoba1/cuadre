@@ -532,7 +532,7 @@ function filaDian(c, esVenta, emp){
   var nitE = nitEmpresaSinDV(emp);
   return [tipoDocTexto(c), c.cufe||"", d.folio, d.prefijo, "COP", "", "", fechaDMY(c.fecha), "",
     esVenta ? nitE : nit, esVenta ? emp.nombre : nombre, esVenta ? nit : nitE, esVenta ? nombre : emp.nombre,
-    Math.round(ge.exenta), Math.round(ge.gravada), Math.round(s.iva), Math.round(s.main), Math.round(s.iva), total, total, "Contabilizado", esVenta ? "Emitido" : "Recibido"];
+    Math.round(ge.exenta), Math.round(ge.gravada), Math.round(s.iva-(s.iva5||0)), Math.round(s.main), Math.round(s.iva), total, total, "Contabilizado", esVenta ? "Emitido" : "Recibido"];
 }
 var ENCABEZADO_DIAN = ["Tipo de documento","CUFE/CUDE","Folio","Prefijo","Divisa","Forma de Pago","Medio de Pago","Fecha Emisión","Fecha Recepción","NIT Emisor","Nombre Emisor","NIT Receptor","Nombre Receptor","EXENTO","BG 19","IVA 19","SUBTOTAL","TOTAL IVA","TOTAL","Total","Estado","Grupo"];
 function aplicarFormatoNumeros(ws, colsNumericas, filaDesde){
@@ -654,24 +654,24 @@ function hoja300Bimestre(per, empresaNombre){
     [empresaNombre.toUpperCase()+" - IVA (FORMULARIO 300)"],
     [mesTitulo(bim.periodos[0])+"-"+mesTitulo(bim.periodos[bim.periodos.length-1])+" "+m2.anio+" · Declaración del Impuesto sobre las Ventas - IVA ("+bim.tipo+") · Periodo DIAN "+bim.codigo],
     [], ["INGRESOS (VENTAS)"], ["Concepto","Casilla","Valor"],
-    ["Por operaciones gravadas a la tarifa general",28,n(r.c28)],
+    ["Por operaciones gravadas a la tarifa general",28,n(r.c28)]].concat(r.hay5 ? [["Por operaciones gravadas a la tarifa del 5%","",n(r.v5)]] : []).concat([
     ["Por operaciones exentas/excluidas",35,n(r.c35)],
     ["Total ingresos brutos",41,n(r.c41)],
     ["Devoluciones en ventas anuladas, rescindidas o resueltas",42,n(r.c42)],
     ["Total ingresos netos recibidos durante el período",43,n(r.c43)],
     ["Total impuesto generado por operaciones gravadas",67,n(r.c67)],
     [], ["COMPRAS"], ["Concepto","Casilla","Valor"],
-    ["De bienes gravados a la tarifa general (nacionales)",51,n(r.c51)],
+    ["De bienes gravados a la tarifa general (nacionales)",51,n(r.c51)]]).concat(r.hay5 ? [["De bienes gravados a la tarifa del 5%","",n(r.comp5)]] : []).concat([
     ["De bienes y servicios excluidos, exentos y no gravados",54,n(r.c54)],
     ["Total compras e importaciones brutas",55,n(r.c55)],
     ["Devoluciones en compras anuladas, rescindidas o resueltas en este período",56,n(r.c56)],
     ["Total compras netas realizadas durante el período",57,n(r.c57)],
-    ["Por compras de bienes gravados a la tarifa general (impuesto descontable)",72,n(r.c72)],
+    ["Por compras de bienes gravados a la tarifa general (impuesto descontable)",72,n(r.c72)]]).concat(r.hay5 ? [["Por compras de bienes gravados a la tarifa del 5% (impuesto descontable)","",n(r.desc5)]] : []).concat([
     ["Total impuestos descontables",81,n(r.c81)],
     [], ["LIQUIDACIÓN"],
     r.c82>0 ? ["Saldo a pagar del período fiscal",82,n(r.c82)] : ["Saldo a favor del período fiscal",83,n(r.c83)],
     [], ["DESGLOSE MENSUAL (referencia)"], [], ["Mes","IVA Generado (67)","IVA Descontable (81)","Saldo"]
-  ];
+  ]);
   r.meses.forEach(function(x){
     aoa.push([mesTitulo(x.periodo), n(x.gen), n(x.desc), (x.neto>=0?"A pagar ":"A favor ")+Math.abs(n(x.neto)).toLocaleString("es-CO")]);
   });
@@ -856,6 +856,11 @@ var CUENTAS_HARDCODED = [
   {cuenta_codigo:"413518", cuenta_nombre:"VENTA DE ANIMALES VIVOS Y CUEROS"},
   {cuenta_codigo:"424525", cuenta_nombre:"INGRESOS POR ARRENDAMIENTOS"},
   {cuenta_codigo:"143501", cuenta_nombre:"MERCANCIA GRAVADA 19%"},
+  {cuenta_codigo:"413502", cuenta_nombre:"VENTAS GRAVADAS 5%"},
+  {cuenta_codigo:"417502", cuenta_nombre:"DEVOLUCION EN VENTAS MERCANCIA GRAVADA 5%"},
+  {cuenta_codigo:"143502", cuenta_nombre:"MERCANCIA GRAVADA 5%"},
+  {cuenta_codigo:"240803", cuenta_nombre:"IVA GENERADO VENTAS 5%"},
+  {cuenta_codigo:"240804", cuenta_nombre:"IVA DESCONTABLE COMPRAS 5%"},
   {cuenta_codigo:"143590", cuenta_nombre:"MERCANCIA EXENTA/EXCLUIDA"},
   {cuenta_codigo:"143595", cuenta_nombre:"DESCUENTOS Y BONIFICACIONES EN COMPRAS"},
   {cuenta_codigo:"513551", cuenta_nombre:"FLETES Y TRANSPORTE"},
@@ -1233,21 +1238,23 @@ function generarCostoVenta(per){
   var yaExiste = S.comprobantes.some(function(c){ return c.periodo===per && c.tipo==="CV"; });
   if(yaExiste && !confirm("Ya existe un comprobante de Costo de Venta para "+periodoLabel(per)+". ¿Generar uno nuevo de todas formas? (el anterior no se elimina solo)")) return;
 
-  var gravadaNeta=0, exentaNeta=0;
+  var gravadaNeta=0, gravada5Neta=0, exentaNeta=0;
   S.comprobantes.forEach(function(c){
     if(c.periodo!==per || c.tipo!=="FV") return;
     var esDevol = /^Nota Crédito/.test(c.descripcion||"");
     var s = gravadaExentaDe(ivaMainDe(c));
-    if(esDevol){ gravadaNeta -= s.gravada; exentaNeta -= s.exenta; }
-    else { gravadaNeta += s.gravada; exentaNeta += s.exenta; }
+    if(esDevol){ gravadaNeta -= s.gravada; gravada5Neta -= s.gravada5; exentaNeta -= s.exenta; }
+    else { gravadaNeta += s.gravada; gravada5Neta += s.gravada5; exentaNeta += s.exenta; }
   });
-  var totalBase = gravadaNeta+exentaNeta;
+  var totalBase = gravadaNeta+gravada5Neta+exentaNeta;
   if(totalBase<=0){ alert("No hay ventas netas en "+periodoLabel(per)+" para calcular el costo de venta."); return; }
   var costoTotal = Math.round(totalBase * TASA_COSTO_VENTA / 100);
   var costoGravada = Math.round(costoTotal * gravadaNeta/totalBase);
-  var costoExenta = costoTotal - costoGravada;
+  var costoGravada5 = Math.round(costoTotal * gravada5Neta/totalBase);
+  var costoExenta = costoTotal - costoGravada - costoGravada5;
   var lineas = [{cuenta:"613501", tercero:"", detalle:"Costo de venta "+TASA_COSTO_VENTA+"% - "+periodoLabel(per), debito:costoTotal, credito:0}];
   if(costoGravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Costo de venta - mercancía gravada 19%", debito:0, credito:costoGravada});
+  if(costoGravada5>0) lineas.push({cuenta:"143502", tercero:"", detalle:"Costo de venta - mercancía gravada 5%", debito:0, credito:costoGravada5});
   if(costoExenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Costo de venta - mercancía exenta/excluida", debito:0, credito:costoExenta});
   guardarComprobante({tipo:"CV", fecha: per+"-01", periodo:per, descripcion:"Costo de venta ("+TASA_COSTO_VENTA+"%) - "+periodoLabel(per), lineas:lineas});
 }
@@ -1685,7 +1692,10 @@ function baseMinimaCompras(fecha, config){
   if(fecha >= SUSPENSION_572_DESDE && fecha <= SUSPENSION_572_HASTA) return Math.round(27 * ((config && config.uvt) || 52374));
   return (config && config.base_minima) || 524000;
 }
-function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas){
+// Cuentas del 5%: solo se usan cuando el XML de la factura trae esa tarifa.
+var CUENTAS_IVA5 = {"413502":1, "417502":1, "143502":1, "240803":1, "240804":1};
+// xmlImp (opcional): impuestos leídos del XML de la factura ({b19,i19,b5,i5}); permite separar 19% y 5%.
+function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, reglas, xmlImp){
   var tipoDocRaw = String(row["Tipo de documento"]||"");
   var esNC = /cr[eé]dito/i.test(tipoDocRaw);
   var esND = !esNC && /d[eé]bito/i.test(tipoDocRaw);
@@ -1737,11 +1747,18 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     else if(CONCEPTOS_SIN_RETENCION.indexOf(tMatch.concepto_retencion)>=0){ reteRenta = 0; }
   }
 
+  var con5 = !!(xmlImp && xmlImp.i5>0);
+  var iva19 = con5 ? xmlImp.i19 : iva;
   function splitGravadaExenta(){
     // El IVA de la DIAN viene redondeado al peso; al revertir la base con
     // IVA/19% y redondearla, cualquier residuo que quede en la exenta es puro
     // ruido de redondeo (no una exenta real), así que se limpia hasta $5.
-    var baseGravada = iva>0 ? Math.round(iva/19*100) : 0;
+    var baseGravada = iva19>0 ? (con5 ? Math.round(xmlImp.b19) : Math.round(iva19/19*100)) : 0;
+    var baseGravada5 = con5 ? Math.round(xmlImp.b5) : 0;
+    if(con5){
+      var exenta5 = total - iva - baseGravada - baseGravada5;
+      return {gravada:baseGravada, gravada5:baseGravada5, exenta:(Math.abs(exenta5)<5 ? 0 : exenta5)};
+    }
     var baseExenta = total - iva - baseGravada;
     if(total>0){
       // Solo se fuerza a 0 cuando el total real es positivo -- en una factura de
@@ -1768,20 +1785,28 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     } else {
       var baseV = splitGravadaExenta();
       if(baseV.gravada>0) lineas.push({cuenta:"413501", tercero:"", detalle:"Venta gravada 19% "+docRef, debito:0, credito: baseV.gravada});
+      if(baseV.gravada5>0) lineas.push({cuenta:"413502", tercero:"", detalle:"Venta gravada 5% "+docRef, debito:0, credito: baseV.gravada5});
       if(baseV.exenta>0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta exenta/excluida "+docRef, debito:0, credito: baseV.exenta});
-      if(baseV.gravada<=0 && baseV.exenta<=0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
+      if(baseV.gravada<=0 && !(baseV.gravada5>0) && baseV.exenta<=0) lineas.push({cuenta:"413590", tercero:"", detalle:"Venta "+docRef, debito:0, credito: total-iva});
     }
-    if(iva>0) lineas.push({cuenta:"240801", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
+    if(con5){
+      if(iva19>0) lineas.push({cuenta:"240801", tercero:"", detalle:"IVA generado 19%", debito:0, credito:iva19});
+      lineas.push({cuenta:"240803", tercero:"", detalle:"IVA generado 5%", debito:0, credito:xmlImp.i5});
+    } else if(iva>0) lineas.push({cuenta:"240801", tercero:"", detalle:"IVA generado", debito:0, credito:iva});
   } else {
     var conceptoGasto = tMatch && CONCEPTO_LABELS[tMatch.concepto_retencion];
     var esMercancia = tMatch && tMatch.tipo==="proveedor" && !conceptoGasto;
     if(esMercancia){
       var baseC = splitGravadaExenta();
       if(baseC.gravada>0) lineas.push({cuenta:"143501", tercero:"", detalle:"Mercancía gravada 19% "+tercNombre+" - "+docRef, debito: baseC.gravada, credito:0});
+      if(baseC.gravada5>0) lineas.push({cuenta:"143502", tercero:"", detalle:"Mercancía gravada 5% "+tercNombre+" - "+docRef, debito: baseC.gravada5, credito:0});
       if(baseC.exenta>0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancía exenta/excluida "+tercNombre+" - "+docRef, debito: baseC.exenta, credito:0});
       else if(baseC.exenta<0) lineas.push({cuenta:"143595", tercero:"", detalle:"Descuento/bonificación del proveedor "+tercNombre+" - "+docRef, debito:0, credito: -baseC.exenta});
-      if(baseC.gravada<=0 && baseC.exenta===0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
-      if(iva>0) lineas.push({cuenta:"240802", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
+      if(baseC.gravada<=0 && !(baseC.gravada5>0) && baseC.exenta===0) lineas.push({cuenta:"143590", tercero:"", detalle:"Mercancías "+tercNombre+" - "+docRef, debito: total-iva, credito:0});
+      if(con5){
+        if(iva19>0) lineas.push({cuenta:"240802", tercero:"", detalle:"IVA descontable 19%", debito:iva19, credito:0});
+        lineas.push({cuenta:"240804", tercero:"", detalle:"IVA descontable 5%", debito:xmlImp.i5, credito:0});
+      } else if(iva>0) lineas.push({cuenta:"240802", tercero:"", detalle:"IVA descontable", debito:iva, credito:0});
     } else if(tMatch && CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion]){
       lineas.push({cuenta:CONCEPTO_CUENTA_FIJA[tMatch.concepto_retencion], tercero:"", detalle:conceptoGasto+" "+tercNombre+" - "+docRef+(iva>0?" (IVA incluido como mayor valor)":""), debito: total, credito:0});
     } else if(conceptoGasto){
@@ -1829,7 +1854,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
         });
         if(pref) elegido = pref;
       }
-      var idx = lineas.findIndex(function(l){ return slotDeCuenta(l.cuenta)===slot; });
+      var idx = lineas.findIndex(function(l){ return !CUENTAS_IVA5[l.cuenta] && slotDeCuenta(l.cuenta)===slot; });
       if(idx>=0){
         lineas[idx] = {cuenta:cod6(elegido.cuenta_codigo), tercero:"", detalle:elegido.cuenta_nombre||lineas[idx].detalle, debito:lineas[idx].debito, credito:lineas[idx].credito};
         porReglas = true;
@@ -1847,7 +1872,7 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     });
   }
   if(esNC){
-    var remapDevolVenta = {"413501":"417501", "413590":"417590"};
+    var remapDevolVenta = {"413501":"417501", "413502":"417502", "413590":"417590"};
     lineas = lineas.map(function(l){
       var cuenta = (esVenta && remapDevolVenta[l.cuenta]) ? remapDevolVenta[l.cuenta] : l.cuenta;
       return {cuenta:cuenta, tercero:l.tercero, detalle:"(NC) "+l.detalle, debito:l.credito, credito:l.debito};
@@ -1892,6 +1917,8 @@ function buildDraftFromDianRow(row, empresa, proveedores, terceros, config, regl
     // o comprador de semovientes (ingreso que no se había facturado).
     dsRecibido: esDocSoporte && !empresaEsEmisor && esCompra,
     porReglas: porReglas,
+    xmlImp: con5 ? xmlImp : null,
+    _row: row,
     debeCuadra: Math.abs(tot.d-tot.c)<1
   };
 }
@@ -2136,6 +2163,73 @@ async function extraerXmlsDeArchivos(files){
   }
   return textos;
 }
+// Lee de la factura electrónica (Invoice, suelta o dentro del AttachedDocument de la DIAN) la base y el IVA por tarifa.
+// Solo se miran los impuestos del total del documento (se descartan los de cada línea) y solo el IVA (esquema 01).
+function parseImpuestosXml(text){
+  var inv = null;
+  if(/<(?:\w+:)?AttachedDocument[\s>]/.test(text)){
+    var reCd = /<!\[CDATA\[([\s\S]*?)\]\]>/g, mc;
+    while((mc = reCd.exec(text))){ if(/<(?:\w+:)?Invoice[\s>]/.test(mc[1])){ inv = mc[1]; break; } }
+  } else if(/<(?:\w+:)?Invoice[\s>]/.test(text)) inv = text;
+  if(!inv) return null;
+  var doc = inv.replace(/<(?:\w+:)?InvoiceLine[\s>][\s\S]*?<\/(?:\w+:)?InvoiceLine>/g, "");
+  var r = {b19:0, i19:0, b5:0, i5:0, otras:[], cude:xmlTag(doc, "UUID").toLowerCase()};
+  var reTt = /<(?:\w+:)?TaxTotal[\s>]([\s\S]*?)<\/(?:\w+:)?TaxTotal>/g, mt;
+  while((mt = reTt.exec(doc))){
+    var reSub = /<(?:\w+:)?TaxSubtotal[\s>]([\s\S]*?)<\/(?:\w+:)?TaxSubtotal>/g, ms;
+    while((ms = reSub.exec(mt[1]))){
+      var sub = ms[1];
+      var esq = sub.match(/<(?:\w+:)?TaxScheme[\s>][\s\S]*?<(?:\w+:)?ID[^>]*>([^<]*)</);
+      if(!esq || esq[1].trim()!=="01") continue;
+      var base = parseFloat(xmlTag(sub, "TaxableAmount"))||0, imp = parseFloat(xmlTag(sub, "TaxAmount"))||0, pct = parseFloat(xmlTag(sub, "Percent"))||0;
+      if(Math.abs(pct-19)<0.01){ r.b19 += base; r.i19 += imp; }
+      else if(Math.abs(pct-5)<0.01){ r.b5 += base; r.i5 += imp; }
+      else if(imp>0) r.otras.push(pct);
+    }
+  }
+  r.b19 = Math.round(r.b19); r.i19 = Math.round(r.i19); r.b5 = Math.round(r.b5); r.i5 = Math.round(r.i5);
+  return r;
+}
+// lista: [{cude?, xml}]. Rehace las facturas de la vista previa que traen IVA al 5% para separarlo del 19%.
+function aplicarXmlFacturas(lista){
+  var porCufe = {}, leidos = 0;
+  (lista||[]).forEach(function(x){
+    var imp = parseImpuestosXml(x.xml);
+    if(!imp) return;
+    var k = String(x.cude||imp.cude||"").trim().toLowerCase();
+    if(!k) return;
+    porCufe[k] = imp; leidos++;
+  });
+  if(!leidos) return "";
+  var empresa = currentEmpresa();
+  var proveedores = S.terceros.filter(function(t){ return t.tipo==="proveedor" && t.identificacion; });
+  var st = {con5:0, mayorValor:0, solo19:0, descuadre:[], otras:[]};
+  (S.importRows||[]).forEach(function(r, i){
+    if(r.esNC || !r.cufe || r.dup || !r._row) return;
+    var imp = porCufe[String(r.cufe).trim().toLowerCase()];
+    if(!imp) return;
+    var doc = extractDocRefFromDescripcion(r.descripcion);
+    if(imp.otras.length){ st.otras.push(doc); r.xmlInfo = "XML: trae IVA con una tarifa distinta de 19% y 5% ("+imp.otras.join(", ")+"%): revísala a mano"; return; }
+    if(!(imp.i5>0)){ if(r.iva>0){ st.solo19++; r.xmlInfo = "XML: todo el IVA es al 19%"; } return; }
+    if(Math.abs(imp.i19+imp.i5-(Number(r.iva)||0))>5){
+      st.descuadre.push(doc); r.xmlInfo = "XML: IVA 19% "+fmtCOP(imp.i19)+" + 5% "+fmtCOP(imp.i5)+" no suma el IVA del listado ("+fmtCOP(r.iva)+"): no lo separé"; return;
+    }
+    var nd = buildDraftFromDianRow(r._row, empresa, proveedores, S.terceros, S.config, S.reglasCuentas, {b19:imp.b19, i19:imp.i19, b5:imp.b5, i5:imp.i5});
+    if(!nd || nd._error) return;
+    nd.include = r.include; nd.dup = r.dup;
+    var separado = nd.lineas.some(function(l){ return CUENTAS_IVA5[l.cuenta]; });
+    nd.xmlInfo = "XML: IVA 19% "+fmtCOP(imp.i19)+" + IVA 5% "+fmtCOP(imp.i5)+(separado ? " (separado en cuentas del 5%)" : " (gasto o diverso: el IVA va como mayor valor, no se separa)");
+    S.importRows[i] = nd;
+    if(separado) st.con5++; else st.mayorValor++;
+  });
+  var partes = [leidos+" factura(s) leída(s) del XML."];
+  if(st.con5) partes.push(st.con5+" traen IVA al 5%: separé el 19% y el 5% en sus cuentas.");
+  if(st.mayorValor) partes.push(st.mayorValor+" con IVA al 5% son gasto o diverso (el IVA queda como mayor valor, igual que antes).");
+  if(st.solo19) partes.push(st.solo19+" solo traen IVA al 19% (sin cambios).");
+  if(st.descuadre.length) partes.push(st.descuadre.length+" no cuadran con el IVA del listado y no se tocaron: "+st.descuadre.slice(0,8).join(", ")+".");
+  if(st.otras.length) partes.push(st.otras.length+" traen otra tarifa de IVA: "+st.otras.slice(0,8).join(", ")+".");
+  return partes.join(" ");
+}
 function aplicarVinculoNC(i, folio){
   var r = S.importRows && S.importRows[i];
   if(!r) return "Fila no encontrada.";
@@ -2158,6 +2252,7 @@ async function cargarXmlNotasCredito(files){
   S.xmlBusy = true; S.xmlResumen = ""; render();
   try{
     var textos = await extraerXmlsDeArchivos(files);
+    var resFacturas = aplicarXmlFacturas(textos.map(function(t){ return {xml:t}; }));   // los XML de facturas (compra o venta) separan 19% y 5%
     var vistos = {}, notas = [];
     textos.forEach(function(t){
       var n = parseNotaCreditoXml(t);
@@ -2204,13 +2299,15 @@ async function cargarXmlNotasCredito(files){
       if(n.detalle && n.esDescuento) info.push("detalle: "+n.detalle);
       r.xmlInfo = info.join(" · ");
     });
-    var partes = [notas.length+" nota(s) crédito leída(s) del XML."];
+    var partes = notas.length ? [notas.length+" nota(s) crédito leída(s) del XML."] : [];
+    if(resFacturas) partes.push(resFacturas);
+    if(!notas.length && !resFacturas) partes.push("No encontré notas crédito ni facturas en esos archivos.");
     if(stats.vinc) partes.push(stats.vinc+" vinculada(s) a su factura con reverso exacto.");
     if(stats.desc) partes.push(stats.desc+" marcada(s) como descuento condicionado.");
     if(stats.dev) partes.push(stats.dev+" marcada(s) como devolución sin factura.");
     if(stats.refNoEnc) partes.push(stats.refNoEnc+" traen una factura que no encontré en Cuadre (importa primero esa factura y vuelve a cargar el XML): "+avisos.join("; ")+".");
     if(stats.manual) partes.push(stats.manual+" quedaron sin clasificar: elige el tipo a mano.");
-    if(stats.sinFila) partes.push(stats.sinFila+" XML no corresponden a ninguna nota de este listado.");
+    if(stats.sinFila && notas.length) partes.push(stats.sinFila+" XML no corresponden a ninguna nota de este listado.");
     if(stats.ventas) partes.push(stats.ventas+" son notas de venta (no se modificaron).");
     S.xmlResumen = partes.join(" ");
   }catch(err){
@@ -2692,7 +2789,7 @@ function topbarHTML(){
 
 function resumenIvaPeriodo(bim){
   var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
-  var vN={main:0,iva:0}, vD={main:0,iva:0}, cN={main:0,iva:0}, cD={main:0,iva:0};
+  var vN={main:0,iva:0,iva5:0}, vD={main:0,iva:0,iva5:0}, cN={main:0,iva:0,iva5:0}, cD={main:0,iva:0,iva5:0};
   list.forEach(function(c){
     var desc = c.descripcion||"";
     if(/^Descuento Condicionado/.test(desc)) return;
@@ -2701,22 +2798,21 @@ function resumenIvaPeriodo(bim){
     var esIngresoEspecial = (c.lineas||[]).some(function(l){return l.cuenta==="424525"||l.cuenta==="413518";});
     if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)){
       var s = ivaMainDe(c), b = esDevol?vD:vN;
-      b.main+=s.main; b.iva+=s.iva;
+      b.main+=s.main; b.iva+=s.iva; b.iva5+=s.iva5;
     } else if((c.tipo==="FC" || c.tipo==="CE") && !esPersonal){
       var s2 = ivaMainDe(c), b2 = esDevol?cD:cN;
-      b2.main+=s2.main; b2.iva+=s2.iva;
+      b2.main+=s2.main; b2.iva+=s2.iva; b2.iva5+=s2.iva5;
     }
   });
-  var fila = function(a){ var g=gravadaExentaDe(a); return {noGrav:g.exenta, grav:g.gravada, iva:a.iva, total:g.exenta+g.gravada+a.iva}; };
-  var neto = function(a,b){ return {noGrav:a.noGrav-b.noGrav, grav:a.grav-b.grav, iva:a.iva-b.iva, total:a.total-b.total}; };
+  var fila = function(a){ var g=gravadaExentaDe(a); return {noGrav:g.exenta, grav:g.gravada, iva:a.iva-a.iva5, grav5:g.gravada5, iva5:a.iva5, ivaTotal:a.iva, total:g.exenta+g.gravada+g.gravada5+a.iva}; };
+  var neto = function(a,b){ return {noGrav:a.noGrav-b.noGrav, grav:a.grav-b.grav, iva:a.iva-b.iva, grav5:a.grav5-b.grav5, iva5:a.iva5-b.iva5, ivaTotal:a.ivaTotal-b.ivaTotal, total:a.total-b.total}; };
   var vn=fila(vN), vd=fila(vD), cn=fila(cN), cd=fila(cD);
   var vt=neto(vn,vd), ct=neto(cn,cd);
-  return {vn:vn, vd:vd, vt:vt, cn:cn, cd:cd, ct:ct, saldo: vt.iva-ct.iva, nDocs:list.length};
+  return {vn:vn, vd:vd, vt:vt, cn:cn, cd:cd, ct:ct, saldo: vt.ivaTotal-ct.ivaTotal, nDocs:list.length};
 }
 function ivaPanelHTML(bim, r){
   var cel = function(x){ return '<td class="num">'+fmtCOP(x)+'</td>'; };
-  var guion = '<td class="num">-</td>';
-  var fila = function(lbl, x, cls){ return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lbl+'</td>'+cel(x.noGrav)+cel(x.grav)+cel(x.iva)+guion+guion+cel(x.total)+'</tr>'; };
+  var fila = function(lbl, x, cls){ return '<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lbl+'</td>'+cel(x.noGrav)+cel(x.grav)+cel(x.iva)+cel(x.grav5)+cel(x.iva5)+cel(x.total)+'</tr>'; };
   var pagar = r.saldo>0 ? r.saldo : 0, favor = r.saldo<0 ? -r.saldo : 0;
   var filaFinal = function(lbl, v){ return '<tr class="total-row"><td colspan="3">'+lbl+'</td>'+cel(v)+'<td colspan="3"></td></tr>'; };
   var vacio = r.nDocs===0 ? '<p class="small" style="margin-top:10px">No hay comprobantes en este periodo de IVA todavía.</p>' : "";
@@ -2731,7 +2827,7 @@ function ivaPanelHTML(bim, r){
       '<tr class="hdr-row"><td colspan="7">Liquidación (IVA generado − IVA descontable)</td></tr>' +
       filaFinal('Total a pagar', pagar) + filaFinal('Saldo a favor', favor) +
     '</tbody></table></div>' + vacio +
-    '<p class="small" style="margin-top:10px">Las compras cuentan solo mercancía (las marcadas como Diverso no se descuentan). Cuadre todavía no separa las operaciones al 5%, por eso esas columnas salen en guion.</p>' +
+    '<p class="small" style="margin-top:10px">Las compras cuentan solo mercancía (las marcadas como Diverso no se descuentan). Las columnas del 5% se llenan con las facturas importadas leyendo su XML de la DIAN (Importar → «Traer también el XML de las facturas»); las importadas antes cuentan todo el IVA al 19%.</p>' +
   '</div>';
 }
 function dashboardHTML(e){
@@ -3147,29 +3243,37 @@ function comprobanteMensualHTML(per){
 function filaFormHTML(casilla, concepto, valor){
   return '<tr><td>'+esc(concepto)+'</td><td class="mono" style="text-align:center">'+casilla+'</td><td class="num">'+fmtCOP(valor)+'</td></tr>';
 }
+// iva = IVA total del comprobante (19% + 5%); iva5 = la parte al 5% (cuentas 240803/240804).
 function ivaMainDe(c){
-  var iva=0;
+  var iva=0, iva5=0;
   (c.lineas||[]).forEach(function(l){
-    if((l.cuenta||"").slice(0,4)==="2408") iva += (Number(l.debito)||0) + (Number(l.credito)||0);
+    var cta = l.cuenta||"";
+    if(cta.slice(0,4)!=="2408") return;
+    var v = (Number(l.debito)||0) + (Number(l.credito)||0);
+    iva += v;
+    if(CUENTAS_IVA5[cta]) iva5 += v;
   });
   var total = c.tipo==="FV" ? (Number(c.total_debito)||0) : (Number(c.total_credito)||0);
-  return {iva:iva, main: total-iva};
+  return {iva:iva, iva5:iva5, main: total-iva};
 }
+// gravada = base al 19%; gravada5 = base al 5%; exenta = el resto (no gravada).
 function gravadaExentaDe(agg){
-  var gravada = agg.iva>0 ? (agg.iva/19*100) : 0;
-  var exenta = agg.main - gravada;
+  var iva5 = agg.iva5||0;
+  var gravada = (agg.iva-iva5)>0 ? ((agg.iva-iva5)/19*100) : 0;
+  var gravada5 = iva5>0 ? (iva5/5*100) : 0;
+  var exenta = agg.main - gravada - gravada5;
   // No se fuerza a 0 cuando sale negativa: una factura de bonificación puede
   // dar una base neta negativa (compensa la gravada) y es un valor real, no
   // un error -- forzarla a 0 corrompía la gravada reportada.
   if(Math.abs(exenta)<1) exenta=0;
-  return {gravada:gravada, exenta:exenta};
+  return {gravada:gravada, gravada5:gravada5, exenta:exenta};
 }
 function formulario300HTML(per){
   var bim = periodoIvaDe(per);
   var list = S.comprobantes.filter(function(c){ return bim.periodos.indexOf(c.periodo)>=0; });
 
-  var vN={main:0,iva:0}, vD={main:0,iva:0};
-  var cN={main:0,iva:0}, cD={main:0,iva:0};
+  var vN={main:0,iva:0,iva5:0}, vD={main:0,iva:0,iva5:0};
+  var cN={main:0,iva:0,iva5:0}, cD={main:0,iva:0,iva5:0};
   var detalle300 = [];
   list.forEach(function(c){
     var esDevol = /^Nota Crédito/.test(c.descripcion||"");
@@ -3183,17 +3287,17 @@ function formulario300HTML(per){
       var ge = gravadaExentaDe(s);
       detalle300.push({sec:sec, nit: c.tercero_nit || (tm?(tm.identificacion||""):""), tercero:nom, fecha:c.fecha,
         tipoDoc: c.tipo==="CE" ? "Documento soporte" : (c.tipo==="NC" ? "Nota contable (ingreso)" : (esDevol ? "Nota de crédito electrónica" : (c.tipo==="FV" ? "Factura de venta" : "Factura electrónica"))),
-        doc: extractDocRefFromDescripcion(c.descripcion), grav: ge.gravada, exenta: ge.exenta, iva: s.iva});
+        doc: extractDocRefFromDescripcion(c.descripcion), grav: ge.gravada+ge.gravada5, exenta: ge.exenta, iva: s.iva});
     };
     if(c.tipo==="FV" || (c.tipo==="NC" && esIngresoEspecial)){
       var s = ivaMainDe(c);
       var b = esDevol?vD:vN;
-      b.main+=s.main; b.iva+=s.iva;
+      b.main+=s.main; b.iva+=s.iva; b.iva5+=s.iva5;
       filaDet300(esDevol?"vD":"vN", s);
     } else if((c.tipo==="FC" || c.tipo==="CE") && !esPersonal){
       var s2 = ivaMainDe(c);
       var b2 = esDevol?cD:cN;
-      b2.main+=s2.main; b2.iva+=s2.iva;
+      b2.main+=s2.main; b2.iva+=s2.iva; b2.iva5+=s2.iva5;
       filaDet300(esDevol?"cD":"cN", s2);
     }
   });
@@ -3201,18 +3305,22 @@ function formulario300HTML(per){
   S._det300 = {bim: bim, filas: detalle300};
   var vNs=gravadaExentaDe(vN), vDs=gravadaExentaDe(vD);
   var cNs=gravadaExentaDe(cN), cDs=gravadaExentaDe(cD);
-  var c28=vNs.gravada, c35=vNs.exenta;
-  var c41=c28+c35;
-  var c42=vDs.gravada+vDs.exenta;
+  // Las filas del 5% no llevan número de casilla: verifícalo en el formulario vigente.
+  var c28=vNs.gravada, c35=vNs.exenta, v5=vNs.gravada5;
+  var c41=c28+v5+c35;
+  var c42=vDs.gravada+vDs.gravada5+vDs.exenta;
   var c43=c41-c42;
   var c67=vN.iva-vD.iva;
+  var gen5=vN.iva5-vD.iva5;
 
-  var c51=cNs.gravada, c54=cNs.exenta;
-  var c55=c51+c54;
-  var c56=cDs.gravada+cDs.exenta;
+  var c51=cNs.gravada, c54=cNs.exenta, comp5=cNs.gravada5;
+  var c55=c51+comp5+c54;
+  var c56=cDs.gravada+cDs.gravada5+cDs.exenta;
   var c57=c55-c56;
-  var c72=cN.iva-cD.iva;
-  var c81=c72;
+  var desc5=cN.iva5-cD.iva5;
+  var c72=(cN.iva-cN.iva5)-(cD.iva-cD.iva5);
+  var c81=c72+desc5;
+  var hay5 = !!(v5 || comp5 || gen5 || desc5);
 
   var saldo=c67-c81;
   var c82=saldo>0?saldo:0, c83=saldo<0?-saldo:0;
@@ -3235,7 +3343,7 @@ function formulario300HTML(per){
     return {periodo:p, label: neto>=0?("A pagar "+fmtCOP(neto)):("A favor "+fmtCOP(-neto)), gen:gen, desc:desc, neto:neto};
   });
   // Resultados numéricos para el respaldo en Excel (mismo cálculo que se muestra en pantalla).
-  S._res300 = {bim:bim, c28:c28, c35:c35, c41:c41, c42:c42, c43:c43, c67:c67, c51:c51, c54:c54, c55:c55, c56:c56, c57:c57, c72:c72, c81:c81, c82:c82, c83:c83, meses:meses};
+  S._res300 = {hay5:hay5, v5:v5, gen5:gen5, comp5:comp5, desc5:desc5, bim:bim, c28:c28, c35:c35, c41:c41, c42:c42, c43:c43, c67:c67, c51:c51, c54:c54, c55:c55, c56:c56, c57:c57, c72:c72, c81:c81, c82:c82, c83:c83, meses:meses};
 
   var html = '<div class="card card-pad">' +
     '<div class="section-title">Declaración IVA — Formulario 300 · '+esc(bim.label)+'</div>' +
@@ -3244,20 +3352,23 @@ function formulario300HTML(per){
     '<div class="small" style="font-weight:600;margin:16px 0 6px">INGRESOS (VENTAS)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
       filaFormHTML(28,"Por operaciones gravadas a la tarifa general",c28) +
+      (hay5 ? filaFormHTML("—","Por operaciones gravadas a la tarifa del 5%",v5) : "") +
       filaFormHTML(35,"Por operaciones exentas/excluidas",c35) +
       filaFormHTML(41,"Total ingresos brutos",c41) +
       filaFormHTML(42,"Devoluciones en ventas anuladas, rescindidas o resueltas",c42) +
       filaFormHTML(43,"Total ingresos netos recibidos durante el período",c43) +
-      filaFormHTML(67,"Total impuesto generado por operaciones gravadas",c67) +
+      filaFormHTML(67,"Total impuesto generado por operaciones gravadas"+(hay5?" (incluye "+fmtCOP(gen5)+" al 5%)":""),c67) +
     '</tbody></table></div>' +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">COMPRAS (mercancía — excluye compras marcadas como Diverso, sin clasificar)</div>' +
     '<div class="table-wrap"><table class="data"><thead><tr><th>Concepto</th><th style="text-align:center">Casilla</th><th class="num">Valor</th></tr></thead><tbody>' +
       filaFormHTML(51,"De bienes gravados a la tarifa general (nacionales)",c51) +
+      (hay5 ? filaFormHTML("—","De bienes gravados a la tarifa del 5%",comp5) : "") +
       filaFormHTML(54,"De bienes y servicios excluidos, exentos y no gravados",c54) +
       filaFormHTML(55,"Total compras e importaciones brutas",c55) +
       filaFormHTML(56,"Devoluciones en compras anuladas, rescindidas o resueltas en este período",c56) +
       filaFormHTML(57,"Total compras netas realizadas durante el período",c57) +
       filaFormHTML(72,"Por compras de bienes gravados a la tarifa general (impuesto descontable)",c72) +
+      (hay5 ? filaFormHTML("—","Por compras de bienes gravados a la tarifa del 5% (impuesto descontable)",desc5) : "") +
       filaFormHTML(81,"Total impuestos descontables",c81) +
     '</tbody></table></div>' +
     '<div class="small" style="font-weight:600;margin:16px 0 6px">LIQUIDACIÓN</div>' +
@@ -3269,7 +3380,7 @@ function formulario300HTML(per){
       meses.map(function(m){return '<tr><td>'+esc(periodoLabel(m.periodo))+'</td><td>'+esc(m.label)+'</td></tr>';}).join("") +
     '</tbody></table></div>' +
     detalle300HTML(detalle300) +
-    '<p class="small" style="margin-top:14px">No incluye importaciones, exportaciones, operaciones a 5%, retenciones de IVA ni saldos a favor de periodos anteriores — agrégalos manualmente al presentar si aplican para este cliente.</p>' +
+    '<p class="small" style="margin-top:14px">'+(hay5 ? 'Las filas del 5% no traen número de casilla: ubícalas en el formulario vigente al presentar. ' : 'Las operaciones al 5% aparecen cuando las facturas se importan leyendo su XML. ')+'No incluye importaciones, exportaciones, retenciones de IVA ni saldos a favor de periodos anteriores — agrégalos manualmente al presentar si aplican para este cliente.</p>' +
   '</div>';
   return html;
 }
@@ -3632,6 +3743,8 @@ function dianConectarCardHTML(){
     '<button class="btn btn-sm" onclick="app.dianTraerListado()" '+ocupado+'>'+(S.dianBusy?"Trabajando…":"Traer listado")+'</button></div>' +
     '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-notas" checked '+ocupado+'> Traer también los XML de las notas crédito y aplicarlos</label>' +
     '<button class="btn btn-outline btn-sm" onclick="app.dianTraerNotas()" '+ocupado+'>Solo traer XML de notas crédito</button></div>' +
+    '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px"><label class="small"><input type="checkbox" id="dian-facturas" checked '+ocupado+'> Traer también el XML de las facturas con IVA (compras y ventas) para separar IVA 19% y 5%</label>' +
+    '<button class="btn btn-outline btn-sm" onclick="app.dianTraerFacturas()" '+ocupado+'>Solo traer XML de facturas</button></div>' +
     (S.dianMsg ? '<div class="small" style="margin-top:10px">'+esc(S.dianMsg)+'</div>' : '') +
     (S.dianDiag ? '<div class="small" style="margin-top:8px">Detalle técnico (cópialo y envíaselo a Claude si hace falta):</div><textarea readonly style="width:100%;height:160px;font-family:var(--mono,monospace);font-size:12px;margin-top:4px" onclick="this.select()">'+esc(S.dianDiag)+'</textarea>' : '') +
     '<details style="margin-top:14px"><summary class="small" style="cursor:pointer">Prueba técnica (avanzado)</summary>' +
@@ -3683,6 +3796,37 @@ async function dianTraerNotas(urlDado){
   S.dianMsg = archivos.length+" XML descargados de la DIAN"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+(errorMsg?(" · se detuvo: "+errorMsg):"")+". Aplicándolos a las notas…"; render();
   await cargarXmlNotasCredito(archivos);   // mismo lector de XML de siempre; deja su resumen en el cuadro de notas crédito
   S.dianMsg = archivos.length+" XML descargados de la DIAN"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+". Ya se aplicaron a las notas: mira el resumen en el cuadro «Notas crédito» y las marcas en cada fila.";
+  render();
+}
+// Baja de la DIAN el XML de las facturas (compra y venta) con IVA de la vista previa y separa el IVA al 19% del 5%.
+async function dianTraerFacturas(urlDado){
+  var url = (typeof urlDado==="string" && urlDado) ? urlDado : ((document.getElementById("dian-enlace")||{}).value || "").trim();
+  if(!url){ alert("Pega primero el enlace de acceso de la DIAN."); return; }
+  // Solo las que importan: con IVA, seleccionadas, y las compras de mercancía (el gasto lleva el IVA como mayor valor).
+  var filas = (S.importRows||[]).filter(function(r){ return !r.esNC && !r.dup && r.include && r.cufe && Number(r.iva)>0 && (r.esVenta || !r.esPersonal); });
+  if(!filas.length){ S.dianMsg = "No hay facturas con IVA seleccionadas en la vista previa. Primero trae o sube el listado."; render(); return; }
+  if(!CuadreOffline.enLinea()){ alert("Necesitas internet para bajar los XML."); return; }
+  var cudes = filas.map(function(r){ return String(r.cufe).trim().toLowerCase(); });
+  S.dianBusy = true; S.dianDiag = ""; S.dianMsg = "Pidiendo a la DIAN el XML de "+cudes.length+" factura(s) con IVA…"; render();
+  var xmls = [], fallidos = 0, diag = [], errorMsg = "";
+  try{
+    for(var i=0;i<cudes.length;i+=40){
+      S.dianMsg = "Descargando XML de facturas ("+Math.min(i+40, cudes.length)+" de "+cudes.length+")…"; render();
+      var r = await sb.real.functions.invoke("dian-notas", {body:{url:url, cudes:cudes.slice(i, i+40)}});
+      if(r.error){ errorMsg = await mensajeDeErrorFuncion(r.error); break; }
+      (r.data.resultados||[]).forEach(function(x){ xmls.push({cude:x.cude, xml:x.xml}); });
+      fallidos += r.data.fallidos||0;
+      if(r.data.diagnostico && r.data.diagnostico.length) diag = diag.concat(r.data.diagnostico);
+    }
+  }catch(err){ errorMsg = (err && err.message) || String(err); }
+  S.dianBusy = false;
+  if(!xmls.length){
+    S.dianMsg = "No se pudieron bajar los XML de las facturas"+(errorMsg?(": "+errorMsg):". La DIAN no entregó ninguno; revisa el detalle técnico de abajo.");
+    if(!errorMsg) S.dianDiag = JSON.stringify(diag, null, 2);
+    render(); return;
+  }
+  var resumen = aplicarXmlFacturas(xmls);
+  S.dianMsg = xmls.length+" XML de facturas descargados"+(fallidos?(" ("+fallidos+" no se pudieron bajar)"):"")+(errorMsg?(" · se detuvo: "+errorMsg):"")+". "+(resumen || "Ninguno traía IVA que separar.");
   render();
 }
 function dianRevisionCardHTML(){
@@ -3791,6 +3935,7 @@ async function dianTraerListado(){
   if(!CuadreOffline.enLinea()){ alert("Necesitas internet para traer el listado."); return; }
   var rangoTxt = fechaDMY(desde)+" a "+fechaDMY(hasta);
   var conNotas = !!(document.getElementById("dian-notas") && document.getElementById("dian-notas").checked);   // se lee antes de redibujar
+  var conFacturas = !!(document.getElementById("dian-facturas") && document.getElementById("dian-facturas").checked);
   S.dianBusy = true; S.dianMsg = "Pidiendo el listado del "+rangoTxt+" a la DIAN. Puede tardar hasta 2 minutos, no cierres esta ventana…"; render();
   try{
     var r = await sb.real.functions.invoke("dian-listado", {body:{url:url, desde:desde, hasta:hasta, grupo:"0"}});
@@ -3807,7 +3952,9 @@ async function dianTraerListado(){
     S.dianBusy = false;
     S.dianMsg = "Listo: "+archivo.name+" (del "+rangoTxt+"). Revisa la vista previa de abajo antes de importar.";
     handleImportFile(archivo);
-    if(conNotas){ await esperarVistaPrevia(); await dianTraerNotas(url); }
+    if(conNotas || conFacturas) await esperarVistaPrevia();
+    if(conNotas) await dianTraerNotas(url);
+    if(conFacturas){ var msgNotas = S.dianMsg; await dianTraerFacturas(url); if(conNotas && S.dianMsg) S.dianMsg = msgNotas+" "+S.dianMsg; render(); }
   }catch(err){ S.dianMsg = "No se pudo traer el listado: "+(err && err.message || err); S.dianBusy = false; render(); }
 }
 async function dianProbar(){
@@ -3850,8 +3997,8 @@ function importarHTML(e){
         return S.importSortDir<0 ? -d : d;
       });
     }
-    body += '<div class="card card-pad" style="margin-top:18px"><div class="section-title">Notas crédito: leer el XML (opcional)</div>' +
-      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto. Descarga el <b>XML</b> de cada nota desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. Cuadre vincula la factura y marca el tipo de cada nota automáticamente.</p>' +
+    body += '<div class="card card-pad" style="margin-top:18px"><div class="section-title">Leer el XML de notas crédito y facturas (opcional)</div>' +
+      '<p class="small" style="margin-bottom:10px">El listado de la DIAN no trae la factura que afecta cada nota crédito ni su concepto, y tampoco la tarifa del IVA de cada factura. Descarga el <b>XML</b> desde la DIAN (botón "Xml de DIAN") y súbelos aquí, sueltos o en un ZIP. En las notas crédito, Cuadre vincula la factura y marca el tipo; en las facturas (compra y venta), separa el IVA al 19% del 5%.</p>' +
       '<input type="file" accept=".xml,.zip" multiple onchange="app.cargarXmlNC(this.files)">' +
       (S.xmlBusy? '<div class="loading"><div class="spin"></div>Leyendo XML…</div>' : "") +
       (S.xmlResumen? '<div class="small" style="margin-top:10px">'+esc(S.xmlResumen)+'</div>' : "") +
@@ -3903,7 +4050,7 @@ function importarHTML(e){
         '<td>'+(r.esVenta?"Venta":"Compra")+(r.esNC?" (NC)":"")+'</td>' +
         '<td style="white-space:nowrap">'+esc(extractDocRefFromDescripcion(r.descripcion))+'</td>' +
         '<td>'+esc(r.descripcion)+'</td>' +
-        '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+'</td>' +
+        '<td>'+esc(r.tercNombre)+ncToggle+ventaToggle+((!r.esNC && r.xmlInfo) ? '<br><span class="small" style="color:var(--good,#2a7)">'+esc(r.xmlInfo)+'</span>' : '')+'</td>' +
         '<td class="num">'+fmtCOP(r.total)+'</td>' +
         '<td>'+flags+'</td>' +
       '</tr>';
@@ -4423,6 +4570,7 @@ window.app = {
   dianProbar: dianProbar,
   dianTraerListado: dianTraerListado,
   dianTraerNotas: function(){ dianTraerNotas(); },
+  dianTraerFacturas: function(){ dianTraerFacturas(); },
   dianRevisarGuardadas: dianRevisarGuardadas,
   dianAplicarRevisionNC: dianAplicarRevisionNC,
   toggleRevisionNC: function(i, val){ if(S.dianRevResultados && S.dianRevResultados[i]){ S.dianRevResultados[i].aplicar = val; render(); } },
