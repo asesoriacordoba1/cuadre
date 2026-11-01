@@ -2152,15 +2152,22 @@ function leerArchivoComoTexto(file){
     fr.readAsText(file, "UTF-8");
   });
 }
+// Lee los .xml de un ZIP; si dentro hay otros ZIP (p. ej. un ZIP por factura dentro de una carpeta comprimida) los abre también.
+async function xmlsDeZip(zip, textos, nivel){
+  var nombres = Object.keys(zip.files).filter(function(n){ return !zip.files[n].dir; });
+  for(var j=0;j<nombres.length;j++){
+    var n = nombres[j];
+    if(/\.xml$/i.test(n)) textos.push(await zip.files[n].async("string"));
+    else if(/\.zip$/i.test(n) && nivel<3) await xmlsDeZip(await JSZip.loadAsync(await zip.files[n].async("arraybuffer")), textos, nivel+1);
+  }
+}
 async function extraerXmlsDeArchivos(files){
   var textos = [];
   for(var k=0;k<files.length;k++){
     var f = files[k];
     if(/\.zip$/i.test(f.name)){
       if(typeof JSZip==="undefined") throw new Error("No se cargó el lector de ZIP. Recarga la página (Ctrl+F5) o sube los .xml sueltos.");
-      var zip = await JSZip.loadAsync(f);
-      var nombres = Object.keys(zip.files).filter(function(n){ return /\.xml$/i.test(n) && !zip.files[n].dir; });
-      for(var j=0;j<nombres.length;j++) textos.push(await zip.files[nombres[j]].async("string"));
+      await xmlsDeZip(await JSZip.loadAsync(f), textos, 0);
     } else if(/\.xml$/i.test(f.name)){
       textos.push(await leerArchivoComoTexto(f));
     }
